@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "Innover",
+    "slug": "innover-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ve.innover.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Innover usa la cámara para tomar el comprobante de pago.",
+        "NSPhotoLibraryUsageDescription": "Innover usa tus fotos para enviar el comprobante de pago.",
+        "NSMicrophoneUsageDescription": "Innover usa el micrófono para notas de voz en el chat.",
+        "NSLocationWhenInUseUsageDescription": "Innover usa tu ubicación para reportar una falla."
+      }
+    },
+    "android": {
+      "package": "ve.innover.mobile",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ]
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-system-ui",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Innover usa la huella dactilar o Face ID para acceder de forma rápida a tu cuenta."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Innover usa tus fotos para enviarlas en el chat.",
+          "cameraPermission": "Innover usa la cámara para enviar fotos en el chat."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Innover usa tu ubicación para reportar una falla."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Innover usa el micrófono para notas de voz en el chat.",
+          "recordAudioAndroid": true
+        }
+      ],
+      "expo-secure-store"
+    ]
+  }
+}

@@ -1,0 +1,110 @@
+---
+description: Reglas de dominio y arquitectura de la app móvil Innover (Expo + Supabase)
+alwaysApply: true
+---
+
+# Innover Mobile — reglas permanentes
+
+## Contexto
+ISP Conexiones Innover (Venezuela; marca también "Fibra Óptica Innover").
+App Expo que reemplaza WhatsApp como canal de clientes, técnicos de campo y gerentes.
+El CRM web (Next.js 15 + Supabase + Wispro + Groq/Nova) sigue siendo el backoffice de los asesores humanos.
+Estas reglas son la fuente de verdad del dominio. Si algo no está aquí ni en el código del CRM, pregunta; no inventes.
+
+## Antes de escribir código
+- Inspecciona el CRM: migraciones, tablas, enums, rutas /api y `replyToConversationWithAi`.
+  Verifica nombres reales de columnas y valores de enums. Si contradicen estas reglas, repórtalo antes de seguir.
+- Antes de usar cualquier endpoint, tabla, columna, RPC o bucket, confirma que existe.
+  Si no existe, escribe literalmente "esto no existe en el CRM; hay que crearlo", anótalo en `docs/BACKEND_GAPS.md`
+  y trabaja contra una interfaz con implementación mock. No finjas llamadas reales.
+
+## Prohibido
+- `/api/whatsapp/*`, Graph API, `WHATSAPP_TOKEN`, plantillas Meta, `wamid` / `wa_message_id` como ID de entrega,
+  ventana de 24 h, estados delivered/read de Meta.
+- Service role key en la app. Solo anon key + JWT del usuario.
+- Calcular o reformatear en el cliente: deuda, Bs, tasa BCV. Se muestran los strings del servidor tal cual.
+- Mostrar al usuario nombres de tools, JSON o IDs internos.
+- Autocorregir el nombre de un técnico (si hay ambigüedad, confirmar con el usuario).
+- Copy que prometa "pago aprobado" (solo "recibido" / "en revisión") o "un asesor te atiende en breve" sin saber el horario.
+
+## Canal app
+- Mensaje del usuario = INSERT en `messages` con `type='in'`, `sender_type='client'`, `metadata.channel='app'`.
+- Adjuntos en Supabase Storage. Respuestas (`type='out'`) por Realtime (`postgres_changes`, filtro `conversation_id`).
+- Una conversación activa por perfil + canal app. No mezclar hilos de WhatsApp legado: filtrar por canal.
+- Los mensajes `type='note'` (notas internas de asesores) jamás deben llegar a la app: ni en UI ni por RLS.
+- Los flujos de Nova (comprobante → cédula → pago → handoff; soporte → pin → ticket; "¿a cuál tasa?")
+  viven en el servidor. La app solo envía mensajes y renderiza respuestas; no reimplementa esos flujos.
+- Lo que falta en backend (ingreso channel=app hacia Nova) se aísla en UN solo módulo con un único
+  `TODO(channel=app)` explícito. No hay otros TODOs vacíos.
+
+## Roles (un usuario = un rol)
+- `customer`: Inicio · Facturación · Chat · Contrato (solo lectura) · Mi ticket.
+- `technician`: Cola · Chat · Caso. Solo ve y cierra sus propios tickets. Cierre exige observación (texto o audio).
+- `supervisor`: Equipo · Técnico · Chat. Ve todos los tickets (pendientes por defecto / resueltos / hoy).
+  "Mis tickets" o "mi ruta" = su cola, no la del equipo. Sin cierre masivo de tickets ajenos.
+- Los asesores NO usan esta app.
+
+## Negocio
+- Saldo en USD (Wispro). Bs = servidor con tasa BCV. Formato VE: miles `.`, decimales `,` ($30,00 · Bs. 26.141,07 · tasa 871,37 Bs/$).
+- Pagos: comprobante (imagen) → cédula → `crm_payments`. Un asesor aprueba en el CRM.
+- Tickets: `crm_wispro_casos` (cola, foto de fachada, Maps, ventana horaria, técnico asignado, cierre con `observation`).
+- Fuera de horario de oficina se pueden registrar pagos; no se promete respuesta humana inmediata.
+
+## Stack (no cambiar sin pedir permiso)
+Expo (SDK vigente) + TypeScript estricto · `@supabase/supabase-js` (Auth, Postgres, Realtime, Storage) ·
+React Navigation (Stack + Bottom Tabs por rol) · TanStack Query para datos de servidor + Realtime ·
+Zustand solo para estado de UI (composer, teclado, envíos fallidos) · NativeWind v4 ·
+React Native Reusables (port de shadcn/ui para RN) como librería de componentes · español de Venezuela.
+No añadas dependencias sin justificarlas.
+
+## Gestor de paquetes (obligatorio: pnpm)
+- Solo `pnpm` y `pnpx` (o `pnpm dlx`). Prohibido `npm`, `npx`, `yarn` y generar `package-lock.json` / `yarn.lock`.
+- Dependencias de Expo: `pnpm expo install <paquete>` (fija la versión compatible con el SDK). El resto: `pnpm add` / `pnpm add -D`.
+- Scaffold inicial: `pnpm create expo-app` o `pnpx create-expo-app@latest`.
+- `.npmrc` en la raíz de la app con `node-linker=hoisted`: Metro/React Native falla con el `node_modules` con symlinks por defecto de pnpm.
+- Si `apps/mobile` vive junto al CRM: usar `pnpm-workspace.yaml`, un único `pnpm-lock.yaml` en la raíz y
+  `pnpm --filter mobile <comando>`. Ajustar `watchFolders` y `resolver.nodeModulesPaths` en `metro.config.js` si hay paquetes compartidos.
+- Scripts en `package.json` para todo lo repetible: `dev`, `android`, `ios`, `typecheck`, `lint`.
+- EAS Build: declarar `packageManager` en `package.json` para que use la versión de pnpm correcta.
+
+## UI: React Native Reusables (obligatorio)
+- Librería de componentes: **React Native Reusables** (shadcn/ui para React Native, sobre NativeWind v4).
+  Prohibido shadcn/ui web, Radix DOM y cualquier otra librería de UI (Paper, Gluestack, Tamagui, NativeBase…) sin permiso.
+- Los componentes se copian al repo con la CLI: `pnpm dlx @react-native-reusables/cli@latest add <componente>`.
+  Quedan en `src/components/ui/`. Se pueden editar, pero no escribas a mano uno que la librería ya ofrece.
+- **No ejecutes `init`**: genera una plantilla con Expo Router y nosotros usamos React Navigation.
+  Haz la configuración base a mano siguiendo la documentación vigente (reactnativereusables.com); consúltala antes,
+  no la recuerdes de memoria: `components.json`, `global.css` con variables de tema, `tailwind.config.js`, helper `cn`
+  en `lib/utils.ts` y alias de rutas.
+- Diferencias con la web que debes respetar:
+  - `PortalHost` montado una sola vez en la raíz (después del navigator, dentro de los providers) para Dialog, Select, Tooltip, etc.
+  - Usa el `Text` de la librería, no el de React Native: no hay cascada de CSS y los estilos se heredan con `TextClassContext`.
+  - Íconos con el wrapper `Icon` + `lucide-react-native`. No uses `@expo/vector-icons`.
+- Tema: los tokens de Innover viven como variables en `global.css` (claro y oscuro) y se reflejan en `tailwind.config.js`.
+  El tema de React Navigation (`NAV_THEME`: tabs, headers) se deriva de esos mismos tokens.
+  Prohibido hex sueltos o `style={{ color }}` en features; usa clases semánticas (`bg-primary`, `text-muted-foreground`, `border-border`, `text-destructive`…).
+- Mapeo sugerido (usa el componente de la librería si existe; si no, compón sobre sus primitivas y documéntalo):
+  - Button: CTAs, Reenviar, Entrar. Input/Textarea: login, búsqueda, observación de cierre.
+  - Card: estado de cuenta, saldo, ficha de caso. Badge: Al día / Con deuda / Suspendido, estado de ticket.
+  - Alert: banner human_mode, fuera de horario, errores. Avatar: Nova / Asesor. Skeleton: cargas.
+  - AlertDialog/Dialog: confirmar cierre de visita. Tabs/ToggleGroup: selector de rol, filtros pendientes / resueltos / hoy.
+- Lo que la librería no trae (burbujas, composer, lista de mensajes, cola de tickets) son componentes propios de cada feature,
+  construidos con los componentes base. No copies la estética de WhatsApp.
+- No quites props de accesibilidad de los componentes copiados. Objetivo táctil ≥ 44 pt: ajusta las variantes de `Button`/`Input` si hace falta.
+
+## Convenciones de código
+- `strict: true`, sin `any`, sin `@ts-ignore`. Tipos de dominio en `src/types`, idénticos a los del CRM (o compartidos).
+- Carpetas: `src/app` (navegación), `src/features/{auth,customer,technician,supervisor,chat}`, `src/lib`, `src/types`.
+- Acceso a datos detrás de "gateways" por feature; la UI no llama a Supabase directo.
+- Toda pantalla cubre: cargando, vacío, error con reintento y, en chat, envío fallido con "Reenviar".
+- Accesibilidad: `accessibilityLabel`/`Role`, objetivos táctiles ≥ 44 pt, contraste AA, teclado que no tapa el composer.
+- UI propia de Innover; no clonar la de WhatsApp. Tokens de color/tipografía solo vía variables de tema (ver sección UI).
+- Commits en Conventional Commits, uno por unidad lógica. Código compilable en cada commit.
+
+## Definición de hecho (toda tarea)
+- `pnpm typecheck` (`tsc --noEmit`) y `pnpm lint` sin errores.
+- Sin `package-lock.json` ni `yarn.lock`; solo `pnpm-lock.yaml`.
+- `grep -ri "whatsapp\|graph.facebook\|wamid" apps/mobile/src` sin resultados (salvo comentarios que expliquen la prohibición).
+- Sin secretos en el repo; `.env.example` actualizado.
+- UI: todo sale de `src/components/ui` o de componentes de feature; `grep -rE "#[0-9a-fA-F]{3,8}\b" apps/mobile/src/features` sin resultados; `PortalHost` montado.
+- `docs/BACKEND_GAPS.md` actualizado con todo lo que se mockeó.

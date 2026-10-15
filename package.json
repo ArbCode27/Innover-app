@@ -1,0 +1,18 @@
+{
+  "name": "innover-app",
+  "private": true,
+  "packageManager": "pnpm@9.10.0",
+  "main": "apps/mobile/index.ts",
+  "scripts": {
+    "start": "pnpm --filter mobile dev",
+    "dev": "pnpm --filter mobile dev",
+    "android": "pnpm --filter mobile android",
+    "ios": "pnpm --filter mobile ios",
+    "typecheck": "pnpm --filter mobile typecheck",
+    "lint": "pnpm --filter mobile lint"
+  },
+  "dependencies": {
+    "expo-local-authentication": "~57.0.3",
+    "expo-secure-store": "~57.0.4"
+  }
+}
