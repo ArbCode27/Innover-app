@@ -1,8 +1,19 @@
-import { setUnauthorizedListener } from "@/lib/api-client";
-import { clearSession, loadSession, saveSession } from "@/lib/session-storage";
+import { setUnauthorizedListener, UnauthorizedError } from "@/lib/api-client";
+import {
+  authenticateWithBiometrics,
+} from "@/features/auth/biometric-gateway";
+import { hydrateRealtime } from "@/features/auth/session-gateway";
+import {
+  clearBiometricSession,
+  clearSession,
+  loadBiometricsEnabled,
+  loadSession,
+  saveSession,
+} from "@/lib/session-storage";
 import type { AppChannelSession } from "@/types/app-channel";
 import type { AppProfile } from "@/types/domain";
 import * as React from "react";
+import { Platform } from "react-native";
 
 const profileFromSession = (session: AppChannelSession): AppProfile => ({
   userId: String(session.client.id),
@@ -20,6 +31,7 @@ type AuthSessionValue = {
   profile: AppProfile | null;
   signIn: (session: AppChannelSession) => Promise<void>;
   signOut: () => Promise<void>;
+  applySession: (session: AppChannelSession) => Promise<void>;
 };
 
 const AuthSessionContext = React.createContext<AuthSessionValue | null>(null);
@@ -34,21 +46,59 @@ export const AuthSessionProvider = ({
 
   const signOut = React.useCallback(async () => {
     await clearSession();
+    await clearBiometricSession();
     setSession(null);
   }, []);
 
-  const signIn = React.useCallback(async (next: AppChannelSession) => {
+  const applySession = React.useCallback(async (next: AppChannelSession) => {
     await saveSession(next);
     setSession(next);
   }, []);
 
+  const signIn = React.useCallback(
+    async (next: AppChannelSession) => {
+      await applySession(next);
+    },
+    [applySession],
+  );
+
   React.useEffect(() => {
     let cancelled = false;
     const restore = async () => {
-      const stored = await loadSession();
-      if (!cancelled) {
-        setSession(stored);
-        setIsReady(true);
+      try {
+        const stored = await loadSession();
+        if (!stored) {
+          return;
+        }
+
+        const bioEnabled = await loadBiometricsEnabled();
+        if (bioEnabled && Platform.OS !== "web") {
+          const bio = await authenticateWithBiometrics();
+          if (!bio.ok) {
+            return;
+          }
+        }
+
+        try {
+          const hydrated = await hydrateRealtime(stored);
+          if (!cancelled) {
+            await saveSession(hydrated);
+            setSession(hydrated);
+          }
+        } catch (error) {
+          if (error instanceof UnauthorizedError) {
+            await clearSession();
+            await clearBiometricSession();
+            return;
+          }
+          if (!cancelled) {
+            setSession(stored);
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setIsReady(true);
+        }
       }
     };
     void restore();
@@ -71,8 +121,9 @@ export const AuthSessionProvider = ({
       profile: session ? profileFromSession(session) : null,
       signIn,
       signOut,
+      applySession,
     }),
-    [isReady, session, signIn, signOut],
+    [applySession, isReady, session, signIn, signOut],
   );
 
   return (

@@ -1,23 +1,91 @@
 # Huecos de backend para la app móvil
 
-Fuente inspeccionada: CRM sibling `C:\Users\Oficce\Documents\innovercorp` (`innover-crm`).
-La app de cliente llama `/api/app/*` (sesión, messages, devices). **Esas rutas no están en el CRM sibling.** No se fingen 200: el `ApiClient` pega al `EXPO_PUBLIC_API_BASE_URL` y muestra el error real.
+Canal de cliente en producción: `https://innover-flow.vercel.app/api/app/*`
+(`session`, `messages`, `tickets`, `devices`). La app **no** usa `/api/crm/*`.
+`EXPO_PUBLIC_APP_CHANNEL_SECRET` debe coincidir con el de Vercel o el login
+responde 401 «Secret de app inválido».
+
+Fuente inspeccionada además: CRM sibling `C:\Users\Oficce\Documents\innovercorp`
+(`innover-crm`) para saldo, pagos y FAQ. No se fingen 200 de `/api/app/*`.
 
 ## esto no existe en el CRM; hay que crearlo
 
-### 0. Canal Innover Flow (`/api/app/session`, `/messages`, `/devices`)
+### 0. Canal Innover Flow (`/api/app/session`, `/messages`, `/tickets`, `/devices`, `/realtime-token`)
 
-- **Estado en CRM sibling:** no hay `app/api/app/*`. El inbox sigue en `/api/crm/*` y el canal legado en `/api/whatsapp/*`.
-- **App:** `src/lib/api-client.ts` implementa el contrato (JWT Bearer, `x-app-secret` solo en session, multipart media).
-- **Propuesta mínima:** las 4 rutas del contrato + tabla `app_devices` + disparo de IA si `human_mode=false`.
+- **Estado en producción:** `https://innover-flow.vercel.app/api/app/*`.
+  Login cédula + clave (`x-app-secret`), JWT 30 días, chat texto/media,
+  tickets de campo, registro de dispositivo y JWT de Supabase Realtime
+  (`login.realtime` + `GET /api/app/realtime-token`).
+- **App:** `src/lib/api-client.ts` pega a esas rutas. Errores `{ error, code }`.
+  `SESSION_EXPIRED` / 401 cierran sesión (salvo `WRONG_PASSWORD` e
+  `INVALID_SECRET` en login). Sin red: «Sin conexión».
+- **Realtime:** cliente Supabase con `login.realtime` (`setAuth(access_token)`,
+  `persistSession: false`). Canal `app:{conversationId}:{clientId}`. Catch-up
+  `GET /messages?after_id=` al foreground y `CHANNEL_ERROR`. Si `realtime`
+  es null o 503, el chat hace polling REST cada 10 s mientras está abierto.
+  Al volver a foreground se renueva el JWT si faltan < 10 min y se
+  resubscribe si el canal murió.
+- **Notas internas** (`type=note`) se ocultan. Ubicación se envía como texto
+  porque el POST no acepta lat/long.
+- **Push:** tras login se intenta `expo-notifications` y
+  `POST /api/app/devices`. Si no hay token (Expo Go / sin projectId), se omite.
+  La app silencia el banner si Chat está enfocado y, al tocar el aviso, abre
+  Chat. **El envío del push al INSERT `type=out` no existe en Innover Flow;
+  hay que crearlo** (Expo Push al token, `data.kind=chat_message`). Sin eso
+  no hay aviso con la app cerrada.
 
-### 1. Login de abonado (cédula + clave autogenerada desde el backend)
+### 0b. Push de mensaje de chat (`type=out` → Expo Push)
 
-- **Estado en CRM:** **esto no existe en el CRM; hay que crearlo**. No hay autenticación de clientes con cédula ni generación automática de contraseñas. `clients` no tiene columna `cedula` (vive en Wispro / `envoicing` / `crm_payments.cedula`) ni hash de credenciales. La tabla `agents` del CRM es para asesores humanos internos (email + password en claro), no para clientes ni perfiles de app.
-- **Mock en la app:** `src/features/auth/session-gateway.ts` y `src/features/auth/auth-gateway.ts`.
-- **Propuesta mínima:**
-  1. `POST /api/app/auth/generate-key`: recibe `{ organization_slug, cedula }`, valida contra el abonado en Wispro/`clients`, genera automáticamente la clave segura (PIN/alfanumérico) y la notifica por SMS/WhatsApp al teléfono del contrato.
-  2. `POST /api/app/auth/login` (o `/api/app/session` con `{ cedula, password }`): verifica la clave contra `app_client_credentials` y devuelve el JWT Bearer con el rol `customer`, datos del abonado y conversación abierta.
+- **Estado en Innover Flow:** **esto no existe en el CRM; hay que crearlo**.
+  `POST /api/app/devices` guarda el token. Nadie envía aviso al INSERT
+  de `messages` `type=out` (Nova o asesor).
+- **App:** registra el token en APK/TestFlight, silencia el banner si Chat
+  está enfocado y al tocar abre Chat + catch-up. No programa notificación
+  local desde Realtime (iOS mata el JS con la app cerrada).
+- **Propuesta mínima:** tras persistir `type=out` de canal app, Expo Push
+  al token con `{ title, body, channelId: "star-chat", data: { kind:
+  "chat_message", conversationId, messageId, direction: "out" } }`.
+  Nunca `type=note` ni `type=in`. Collapse por conversación.
+
+### 0c. Push de ticket de campo (`field_tickets` INSERT → Expo Push)
+
+- **Estado en Innover Flow:** **esto no existe en el CRM; hay que crearlo**.
+  `POST /api/app/devices` guarda el token. Nadie manda Expo Push al INSERT
+  de `field_tickets`. Con la app cerrada, iOS mata el JS y Realtime no
+  alcanza.
+- **App:** si Realtime entrega el INSERT (app abierta, incluso en Chat),
+  muestra aviso local (`kind=field_ticket`, canal `star-ticket`) y al
+  tocar abre Mi ticket. El handler ya acepta el mismo `data.kind` cuando
+  Flow envíe el push. No se silencia si el abonado está escribiendo.
+- **Propuesta mínima:** tras persistir un ticket de campo del cliente de
+  canal app, Expo Push al token con `{ title, body, channelId:
+  "star-ticket", data: { kind: "field_ticket", ticketId, publicId,
+  conversationId } }`. Solo INSERT. Collapse por `ticketId`.
+
+### 1. Login de abonado (cédula + clave)
+
+- **Estado en producción:** `POST /api/app/session` con `x-app-secret` +
+  `{ action: "login", cedula, password }`. La clave es dígitos de cédula + iniciales.
+- **App:** `session-gateway.ts` llama al API. No pide `organization_slug`.
+  No hay login por teléfono ni «solicitar clave». El registro opcional
+  (`action: register`) no es el flujo principal y no está en la UI.
+
+### 1b. Avisos de red al abonado (`GET /api/app/notices` + FCM)
+
+- **Estado en CRM:** **esto no existe en el CRM; hay que crearlo**. No hay
+  catálogo de avisos de corte / potencia / trabajo en zona / restablecido.
+- **Mock en la app:** `service-notice-gateway.ts` + store de UI. Los 4
+  botones de simulación solo aparecen en `__DEV__`. La campana y el estado
+  de conexión leen el mismo aviso. «Mostrar en el teléfono» dispara una
+  notificación **local** (  `expo-notifications`); no es FCM. En Expo Go
+  (Android SDK 53+) no se importa ese módulo: falta
+  `ExpoTopicSubscriptionModule`. El APK de EAS se genera desde
+  `apps/mobile` (`pnpm build:android:preview`): perfil `preview`,
+  JS embebido, sin Metro. Un build desde la raíz del monorepo no
+  enlaza `react-native-gesture-handler` y arranca en rojo.
+- **Propuesta mínima:** `GET /api/app/notices` con `{ id, kind, severity,
+  title, body, created_at }` y push FCM `data.kind`. La app no inventa el
+  copy en producción.
 
 ### 2. Resolución de perfil desde el JWT
 
@@ -33,15 +101,25 @@ La app de cliente llama `/api/app/*` (sesión, messages, devices). **Esas rutas 
 
 ### 4. Ingreso `channel=app` hacia Nova (sin Graph / Meta)
 
-- **Estado en CRM:** `replyToConversationWithAi` envía por Graph y exige teléfono. Callers: webhook WhatsApp, process-receipt, `/api/crm/ai/reply` (secreto interno).
-- **Mock / aislamiento:** un solo módulo `src/lib/channel-app-ingress.ts` con `TODO(channel=app)`.
-- **Propuesta mínima:** adapter de salida `app` (INSERT `type='out'` + Realtime) y `POST /api/app/messages` JWT que respete `human_mode` / horario.
+- **Estado en Innover-Flow:** `POST /api/app/messages` escribe el `type=in` y,
+  si `human_mode === false`, la IA responde en background. La respuesta
+  **no** viene en el POST: llega por Realtime (`INSERT type=out`) o por GET.
+- **CRM sibling (innovercorp):** `replyToConversationWithAi` sigue atado a
+  Graph / Meta. No se llama desde esta app.
+- **Aislamiento legado:** `src/lib/channel-app-ingress.ts` con
+  `TODO(channel=app)` (solo el mock de `chat-gateway.ts`, no el canal REST).
 
 ### 5. Cotización de saldo ya formateada
 
 - **Estado en CRM:** `accountStatus` / `serviceSuspended` y `enrichDebtWithBcv` existen en servidor, pero no hay endpoint para la app.
 - **Mock:** `src/features/customer/account-quote-gateway.ts` (strings VE fijos).
-- **Propuesta mínima:** `GET /api/app/account-quote` con solo strings: `account_status`, `debt_usd_formatted`, `debt_bs_formatted`, `bcv_rate_display`, `office_closed`, `next_open_label`.
+- **Propuesta mínima:** `GET /api/app/account-quote` con solo strings: `account_status`, `debt_usd_formatted`, `debt_bs_formatted`, `bcv_rate_display`, `office_closed`, `next_open_label`, `period_label`, `due_hint`.
+
+### 5b. Instrucciones de pago (banco destino, RIF, teléfono, métodos)
+
+- **Estado en CRM:** **esto no existe en el CRM; hay que crearlo**. No hay endpoint JWT ni tabla de datos bancarios de cobro (Pago Móvil, transferencia, depósito, depósito USD) para la app. Nova tampoco inyecta cuenta/teléfono/RIF desde `crm_settings`.
+- **Mock en la app:** `src/features/customer/payment-instructions-gateway.ts`. Los montos se copian de `account-quote` (strings VE). Banco/RIF/teléfono son datos mock de destino.
+- **Propuesta mínima:** `GET /api/app/payment-instructions` con métodos y campos ya formateados (`bank_name`, `rif`, `phone`, `amount_line`, `updated_at_label`). La app no calcula Bs ni tasa BCV.
 
 ### 6. Bucket de adjuntos y políticas
 
@@ -61,11 +139,14 @@ La app de cliente llama `/api/app/*` (sesión, messages, devices). **Esas rutas 
 - **Mock:** `sendClientDraft` arma el payload real (`type='in'`, `sender_type='client'`, `metadata.channel='app'`, `media_type`, `media_url`, lat/long) y solo inserta si hay conversación real.
 - **Propuesta mínima:** el ingreso `channel=app` (ítem 4) debe persistir y disparar Nova. Entonces el comprobante aparece en el CRM con su `client_id`.
 
-### 9. Ticket del cliente (`crm_wispro_casos.wispro_public_id`)
+### 9. Ticket del cliente (`GET /api/app/tickets`)
 
-- **Estado en CRM:** la tabla y `wispro_public_id` existen. RLS sin policies en repo. Login mock no es JWT.
-- **Mock:** `fetchCustomerOpenTicket` **no inventa número**. Si el `userId` empieza por `mock-`, devuelve `null` (estado vacío). Con JWT real consulta `crm_wispro_casos` (`open`/`scheduled`, `crm_client_id`, `wispro_public_id IS NOT NULL`).
-- **esto no existe en el CRM; hay que crearlo:** endpoint o RLS para que el abonado lea solo su caso.
+- **Estado en producción:** listado y detalle (`:id` UUID o `public_id`).
+  El cliente no crea tickets.
+- **App:** `ticket-gateway.ts` mapea labels de status/prioridad/tipo.
+  Inicio muestra la visita `open,scheduled` si existe. Mi ticket lista
+  todos, pinta el status/resolución del servidor (sin stepper inventado)
+  y abre `maps_url` si existe. Un INSERT por Realtime avisa al cliente.
 
 ### 10. Contrato: titular, cédula, IP
 
@@ -95,6 +176,21 @@ La app de cliente llama `/api/app/*` (sesión, messages, devices). **Esas rutas 
 - **Estado en CRM:** `listAllOpenTeamCasos` y `resolveTechnicianByName` (directorio Wispro + `crm_technicians` + casos) viven en service role. El match de nombres usa fonética y Levenshtein. **No hay endpoint JWT ni RLS de supervisor.**
 - **Mock:** Equipo lee todos los `crm_wispro_casos` (o el store mock). Técnico busca **tal cual** se escribe, sin fonética ni Levenshtein. «Mis tickets» / «mi ruta» filtra `employee_id = supervisorId`. Sin acciones de cierre.
 - **esto no existe en el CRM; hay que crearlo:** `GET /api/app/team-tickets` y `GET /api/app/technicians?name=` + policy `app_is_supervisor()`.
+
+### 15. Preguntas frecuentes
+
+- **Estado en CRM:** **esto no existe en el CRM; hay que crearlo**. No hay tabla ni endpoint JWT de FAQ para la app.
+- **Mock:** `src/features/customer/faq-gateway.ts` (lista fija en español VE).
+- **Propuesta mínima:** `GET /api/app/faqs` con `{ id, question, answer }` publicados por el backoffice.
+
+### 16. Límite de 2 dispositivos
+
+- **Estado en CRM:** **esto no existe en el CRM; hay que crearlo**. `POST /api/app/devices` del contrato es para push token, no para cupo de sesiones.
+- **Mock:** `src/features/devices/devices-gateway.ts` persiste un registro por cédula en SecureStore. Si hay 2 equipos ajenos, el login no entra.
+- **Propuesta mínima:**
+  1. Tabla `app_devices` (`user_id`, `device_id`, `platform`, `last_seen`).
+  2. Login: si `count >= 2` y `device_id` no está, responder `409 DEVICE_LIMIT` con la lista.
+  3. Revocar: `DELETE /api/app/devices/:id` (el más antiguo u otro elegido).
 
 ## Discrepancias ya aplicadas en tipos de la app
 

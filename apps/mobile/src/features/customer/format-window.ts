@@ -77,3 +77,17 @@ export const formatTicketWindow = (
   }
   return `${breakdown.dateLabel} (${breakdown.hoursLabel})`;
 };
+
+export const formatTicketInstant = (iso: string | null): string | null => {
+  if (!iso) {
+    return null;
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  const rawDateStr = formatDate(date);
+  const capitalizedDate =
+    rawDateStr.charAt(0).toUpperCase() + rawDateStr.slice(1);
+  return `${capitalizedDate} · ${formatTime(date)}`;
+};

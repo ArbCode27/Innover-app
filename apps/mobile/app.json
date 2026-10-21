@@ -1,29 +1,40 @@
 {
   "expo": {
-    "name": "Innover",
+    "name": "Star Conectados",
     "slug": "innover-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#EAF2FC"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "ve.innover.mobile",
       "infoPlist": {
-        "NSCameraUsageDescription": "Innover usa la cámara para tomar el comprobante de pago.",
-        "NSPhotoLibraryUsageDescription": "Innover usa tus fotos para enviar el comprobante de pago.",
-        "NSMicrophoneUsageDescription": "Innover usa el micrófono para notas de voz en el chat.",
-        "NSLocationWhenInUseUsageDescription": "Innover usa tu ubicación para reportar una falla."
+        "NSCameraUsageDescription": "Star Conectados usa la cámara para tomar el comprobante de pago.",
+        "NSPhotoLibraryUsageDescription": "Star Conectados usa tus fotos para enviar el comprobante de pago.",
+        "NSMicrophoneUsageDescription": "Star Conectados usa el micrófono para notas de voz en el chat.",
+        "NSLocationWhenInUseUsageDescription": "Star Conectados usa tu ubicación para reportar una falla."
       }
     },
     "android": {
       "package": "ve.innover.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT"
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -34,30 +45,56 @@
       [
         "expo-local-authentication",
         {
-          "faceIDPermission": "Innover usa la huella dactilar o Face ID para acceder de forma rápida a tu cuenta."
+          "faceIDPermission": "Star Conectados usa la huella dactilar o Face ID para acceder de forma rápida a tu cuenta."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Innover usa tus fotos para enviarlas en el chat.",
-          "cameraPermission": "Innover usa la cámara para enviar fotos en el chat."
+          "photosPermission": "Star Conectados usa tus fotos para enviarlas en el chat.",
+          "cameraPermission": "Star Conectados usa la cámara para enviar fotos en el chat."
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Innover usa tu ubicación para reportar una falla."
+          "locationWhenInUsePermission": "Star Conectados usa tu ubicación para reportar una falla."
         }
       ],
       [
         "expo-audio",
         {
-          "microphonePermission": "Innover usa el micrófono para notas de voz en el chat.",
+          "microphonePermission": "Star Conectados usa el micrófono para notas de voz en el chat.",
           "recordAudioAndroid": true
         }
       ],
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#336CFF",
+          "defaultChannel": "innover-info"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#EAF2FC",
+          "image": "./assets/splash.png",
+          "imageWidth": 240,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#EAF2FC",
+            "image": "./assets/splash.png"
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e38c8987-e7bd-4fdc-b5a0-beda05129941"
+      }
+    },
+    "owner": "innover"
   }
 }

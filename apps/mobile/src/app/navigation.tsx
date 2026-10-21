@@ -1,98 +1,104 @@
 import type {
+  CustomerStackParamList,
   CustomerTabParamList,
+  RootStackParamList,
   SupervisorTabParamList,
   TechnicianTabParamList,
 } from "@/app/navigation-types";
 import { UiKitPreviewScreen } from "@/app/ui-kit-preview";
+import { AppHeader } from "@/components/app-header";
+import { GlassTabBar } from "@/components/glass-tab-bar";
+import { ChatBackHeader } from "@/features/chat/chat-back-header";
 import { Icon } from "@/components/ui/icon";
-import { Text } from "@/components/ui/text";
 import { useAuthSession } from "@/features/auth/auth-session";
 import { LoginScreen } from "@/features/auth/login-screen";
 import { ChatScreen } from "@/features/chat/chat-screen";
-import { CustomerBillingScreen } from "@/features/customer/billing-screen";
+import { CustomerBillingNavigator } from "@/features/customer/billing-navigator";
 import { CustomerContractScreen } from "@/features/customer/contract-screen";
+import { CustomerDevicesScreen } from "@/features/customer/devices-screen";
+import { CustomerFaqScreen } from "@/features/customer/faq-screen";
 import { CustomerHomeScreen } from "@/features/customer/home-screen";
 import { CustomerMyTicketScreen } from "@/features/customer/my-ticket-screen";
 import { SupervisorTeamScreen } from "@/features/supervisor/team-screen";
 import { SupervisorTechnicianScreen } from "@/features/supervisor/technician-screen";
 import { TechnicianCaseScreen } from "@/features/technician/case-screen";
 import { TechnicianQueueScreen } from "@/features/technician/queue-screen";
-import { THEME } from "@/lib/theme";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import {
   Activity,
-  CreditCard,
   FileText,
   Home,
   MessageSquare,
   Ticket,
 } from "lucide-react-native";
-import { useColorScheme } from "nativewind";
 import * as React from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
-
-export type RootStackParamList = {
-  Login: undefined;
-  CustomerApp: undefined;
-  TechnicianApp: undefined;
-  SupervisorApp: undefined;
-  UiKitPreview: undefined;
-};
+import { ActivityIndicator, View } from "react-native";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const CustomerStack = createNativeStackNavigator<CustomerStackParamList>();
 const CustomerTab = createBottomTabNavigator<CustomerTabParamList>();
 const TechnicianTab = createBottomTabNavigator<TechnicianTabParamList>();
 const SupervisorTab = createBottomTabNavigator<SupervisorTabParamList>();
 
-const SignOutButton = () => {
-  const { signOut } = useAuthSession();
-  return (
-    <Pressable
-      onPress={() => {
-        void signOut();
-      }}
-      accessibilityRole="button"
-      accessibilityLabel="Cerrar sesión"
-      className="min-h-11 min-w-11 items-center justify-center px-3"
-    >
-      <Text className="text-xs font-bold uppercase tracking-wider text-primary">Salir</Text>
-    </Pressable>
-  );
+// 👇 `tabBar` es una PROP del navigator (no una opción de screenOptions).
+// Se define aquí y se pasa como prop en cada Tab.Navigator.
+const renderGlassTabBar = (props: React.ComponentProps<typeof GlassTabBar>) => (
+  <GlassTabBar {...props} />
+);
+
+const glassTabScreenOptions = {
+  tabBarShowLabel: false,
+  tabBarHideOnKeyboard: true,
+  tabBarStyle: {
+    position: "absolute" as const,
+    backgroundColor: "transparent",
+    borderTopWidth: 0,
+    elevation: 0,
+    shadowOpacity: 0,
+  },
 };
 
-const CustomerNavigator = () => {
-  const { colorScheme } = useColorScheme();
-  const theme = colorScheme === "light" ? THEME.light : THEME.dark;
+const hiddenTabBarStyle = {
+  display: "none" as const,
+};
 
+const chatTabOptions = (backRoute: string) => ({
+  title: "Chat",
+  tabBarStyle: hiddenTabBarStyle,
+  header: ({
+    navigation,
+  }: {
+    navigation: { navigate: (name: string) => void };
+  }) => (
+    <ChatBackHeader
+      onBack={() => {
+        navigation.navigate(backRoute);
+      }}
+    />
+  ),
+  tabBarIcon: ({ color, size }: { color: string; size: number }) => (
+    <Icon as={MessageSquare} size={size} color={color} />
+  ),
+});
+
+const CustomerTabs = () => {
   return (
     <CustomerTab.Navigator
       initialRouteName="Inicio"
+      tabBar={renderGlassTabBar}
       screenOptions={{
-        headerStyle: {
-          backgroundColor: theme.background,
-        },
-        headerTintColor: theme.foreground,
-        headerTitleStyle: {
-          fontWeight: "bold",
-          fontSize: 16,
-        },
-        headerRight: SignOutButton,
-        tabBarStyle: {
-          backgroundColor: theme.card,
-          borderTopColor: theme.border,
-          height: 62,
-          paddingBottom: 8,
-          paddingTop: 6,
-        },
-        tabBarActiveTintColor: theme.primary,
-        tabBarInactiveTintColor: theme.mutedForeground,
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: "600",
-        },
-      }}
-    >
+        ...glassTabScreenOptions,
+        header: ({ route }) => (
+          <AppHeader
+            subtitle={
+              route.name === "Inicio"
+                ? "COBERTURA NACIONAL"
+                : `${route.name.toUpperCase()} · COBERTURA NACIONAL`
+            }
+          />
+        ),
+      }}>
       <CustomerTab.Screen
         name="Inicio"
         component={CustomerHomeScreen}
@@ -104,24 +110,9 @@ const CustomerNavigator = () => {
         }}
       />
       <CustomerTab.Screen
-        name="Facturación"
-        component={CustomerBillingScreen}
-        options={{
-          title: "Facturación",
-          tabBarIcon: ({ color, size }) => (
-            <Icon as={CreditCard} size={size} color={color} />
-          ),
-        }}
-      />
-      <CustomerTab.Screen
         name="Chat"
         component={ChatScreen}
-        options={{
-          title: "Chat",
-          tabBarIcon: ({ color, size }) => (
-            <Icon as={MessageSquare} size={size} color={color} />
-          ),
-        }}
+        options={chatTabOptions("Inicio")}
       />
       <CustomerTab.Screen
         name="Mi ticket"
@@ -133,47 +124,58 @@ const CustomerNavigator = () => {
           ),
         }}
       />
-      <CustomerTab.Screen
-        name="Contrato"
-        component={CustomerContractScreen}
-        options={{
-          title: "Contrato",
-          tabBarIcon: ({ color, size }) => (
-            <Icon as={FileText} size={size} color={color} />
-          ),
-        }}
-      />
     </CustomerTab.Navigator>
   );
 };
 
-const TechnicianNavigator = () => {
-  const { colorScheme } = useColorScheme();
-  const theme = colorScheme === "light" ? THEME.light : THEME.dark;
+const CustomerNavigator = () => {
+  return (
+    <CustomerStack.Navigator screenOptions={{ headerShown: false }}>
+      <CustomerStack.Screen name="CustomerTabs" component={CustomerTabs} />
+      <CustomerStack.Screen
+        name="Facturación"
+        component={CustomerBillingNavigator}
+        options={{ headerShown: false }}
+      />
+      <CustomerStack.Screen
+        name="Contrato"
+        component={CustomerContractScreen}
+        options={{
+          headerShown: true,
+          title: "Contrato",
+        }}
+      />
+      <CustomerStack.Screen
+        name="Ayuda"
+        component={CustomerFaqScreen}
+        options={{
+          headerShown: true,
+          title: "Preguntas frecuentes",
+        }}
+      />
+      <CustomerStack.Screen
+        name="Dispositivos"
+        component={CustomerDevicesScreen}
+        options={{
+          headerShown: true,
+          title: "Dispositivos",
+        }}
+      />
+    </CustomerStack.Navigator>
+  );
+};
 
+const TechnicianNavigator = () => {
   return (
     <TechnicianTab.Navigator
       initialRouteName="Cola"
+      tabBar={renderGlassTabBar}
       screenOptions={{
-        headerStyle: {
-          backgroundColor: theme.background,
-        },
-        headerTintColor: theme.foreground,
-        headerTitleStyle: {
-          fontWeight: "bold",
-        },
-        headerRight: SignOutButton,
-        tabBarStyle: {
-          backgroundColor: theme.card,
-          borderTopColor: theme.border,
-          height: 62,
-          paddingBottom: 8,
-          paddingTop: 6,
-        },
-        tabBarActiveTintColor: theme.primary,
-        tabBarInactiveTintColor: theme.mutedForeground,
-      }}
-    >
+        ...glassTabScreenOptions,
+        header: ({ route }) => (
+          <AppHeader subtitle={`TÉCNICO · ${route.name.toUpperCase()}`} />
+        ),
+      }}>
       <TechnicianTab.Screen
         name="Cola"
         component={TechnicianQueueScreen}
@@ -187,12 +189,7 @@ const TechnicianNavigator = () => {
       <TechnicianTab.Screen
         name="Chat"
         component={ChatScreen}
-        options={{
-          title: "Chat",
-          tabBarIcon: ({ color, size }) => (
-            <Icon as={MessageSquare} size={size} color={color} />
-          ),
-        }}
+        options={chatTabOptions("Cola")}
       />
       <TechnicianTab.Screen
         name="Caso"
@@ -209,32 +206,16 @@ const TechnicianNavigator = () => {
 };
 
 const SupervisorNavigator = () => {
-  const { colorScheme } = useColorScheme();
-  const theme = colorScheme === "light" ? THEME.light : THEME.dark;
-
   return (
     <SupervisorTab.Navigator
       initialRouteName="Equipo"
+      tabBar={renderGlassTabBar}
       screenOptions={{
-        headerStyle: {
-          backgroundColor: theme.background,
-        },
-        headerTintColor: theme.foreground,
-        headerTitleStyle: {
-          fontWeight: "bold",
-        },
-        headerRight: SignOutButton,
-        tabBarStyle: {
-          backgroundColor: theme.card,
-          borderTopColor: theme.border,
-          height: 62,
-          paddingBottom: 8,
-          paddingTop: 6,
-        },
-        tabBarActiveTintColor: theme.primary,
-        tabBarInactiveTintColor: theme.mutedForeground,
-      }}
-    >
+        ...glassTabScreenOptions,
+        header: ({ route }) => (
+          <AppHeader subtitle={`SUPERVISIÓN · ${route.name.toUpperCase()}`} />
+        ),
+      }}>
       <SupervisorTab.Screen
         name="Equipo"
         component={SupervisorTeamScreen}
@@ -258,12 +239,7 @@ const SupervisorNavigator = () => {
       <SupervisorTab.Screen
         name="Chat"
         component={ChatScreen}
-        options={{
-          title: "Chat",
-          tabBarIcon: ({ color, size }) => (
-            <Icon as={MessageSquare} size={size} color={color} />
-          ),
-        }}
+        options={chatTabOptions("Equipo")}
       />
     </SupervisorTab.Navigator>
   );
@@ -295,10 +271,7 @@ export const RootNavigator = () => {
               component={SupervisorNavigator}
             />
           ) : (
-            <Stack.Screen
-              name="CustomerApp"
-              component={CustomerNavigator}
-            />
+            <Stack.Screen name="CustomerApp" component={CustomerNavigator} />
           )}
           {__DEV__ ? (
             <Stack.Screen

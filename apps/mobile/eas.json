@@ -1,0 +1,27 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "pnpm": "9.10.0",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://innover-flow.vercel.app"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "environment": "production",
+      "pnpm": "9.10.0",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://innover-flow.vercel.app"
+      }
+    }
+  }
+}

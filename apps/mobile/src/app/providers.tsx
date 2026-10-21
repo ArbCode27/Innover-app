@@ -1,4 +1,5 @@
 import { AuthSessionProvider } from "@/features/auth/auth-session";
+import { SessionServices } from "@/features/auth/session-services";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useColorScheme } from "nativewind";
 import { StatusBar } from "expo-status-bar";
@@ -13,6 +14,7 @@ export const AppProviders = ({ children }: { children: ReactNode }) => {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthSessionProvider>
+        <SessionServices />
         <StatusBar style={scheme === "dark" ? "light" : "dark"} />
         {children}
       </AuthSessionProvider>

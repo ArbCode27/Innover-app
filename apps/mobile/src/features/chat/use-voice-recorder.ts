@@ -11,9 +11,24 @@ export const useVoiceRecorder = () => {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!recorderState.isRecording) {
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 250);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [recorderState.isRecording]);
 
   const handleStart = async () => {
     setErrorMessage(null);
+    setElapsedSeconds(0);
     try {
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
@@ -52,6 +67,7 @@ export const useVoiceRecorder = () => {
 
   return {
     isRecording: recorderState.isRecording,
+    elapsedSeconds,
     errorMessage,
     handleStart,
     handleStop,

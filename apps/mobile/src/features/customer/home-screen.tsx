@@ -1,4 +1,7 @@
-import type { CustomerTabParamList } from "@/app/navigation-types";
+import type {
+  CustomerStackParamList,
+  CustomerTabParamList,
+} from "@/app/navigation-types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,51 +14,79 @@ import {
 } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
+import { InnoverIcon } from "@/components/brand-logo";
 import { ScreenState } from "@/components/screen-state";
 import { useAuthSession } from "@/features/auth/auth-session";
 import { AccountStatusBadge } from "@/features/customer/account-status-badge";
 import { fetchAccountQuote } from "@/features/customer/account-quote-gateway";
+import { fetchHomeFaqPreview } from "@/features/customer/faq-gateway";
 import {
-  fetchCustomerOpenTicket,
-  MOCK_CUSTOMER_TICKET,
-} from "@/features/customer/ticket-gateway";
-import { ticketStatusLabel } from "@/features/customer/ticket-status-badge";
-import { useNavigation } from "@react-navigation/native";
+  chromeForSeverity,
+  resolveHomeLinkState,
+  SIMULATOR_LABEL,
+} from "@/features/customer/service-notice-appearance";
+import {
+  SERVICE_NOTICE_KINDS,
+} from "@/features/customer/service-notice-gateway";
+import {
+  canPresentLocalServiceNotice,
+  presentLocalServiceNotice,
+} from "@/features/customer/local-service-notification";
+import { ServiceNoticeRow } from "@/features/customer/service-notice-row";
+import type { UserNotice } from "@/lib/user-notice";
+import {
+  selectActiveNotice,
+  useServiceNoticeStore,
+} from "@/features/customer/service-notice-store";
+import { customerOpenTicketQueryKey } from "@/features/chat/chat-cache";
+import { fetchCustomerOpenTicket } from "@/features/customer/ticket-gateway";
+import { noticeFromUnknown } from "@/lib/user-notice";
+import { cn } from "@/lib/utils";
+import { displayTicketStatus } from "@/features/customer/ticket-status-badge";
+import { formatTicketWindowBreakdown } from "@/features/customer/format-window";
+import {
+  useNavigation,
+  type CompositeNavigationProp,
+} from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity,
-  AlertCircle,
   AlertTriangle,
   ArrowRight,
   Check,
   CheckCircle2,
-  Clock,
+  ChevronRight,
   CreditCard,
   FileText,
+  Headphones,
+  HelpCircle,
   Info,
+  Bell,
   MapPin,
   RefreshCw,
-  ShieldCheck,
   Ticket,
-  UserCheck,
-  Wifi,
-  WifiOff,
-  Zap,
 } from "lucide-react-native";
 import * as React from "react";
 import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 
-type ConnectionStateMode = "active" | "issue" | "cut";
-
 export const CustomerHomeScreen = () => {
   const { profile } = useAuthSession();
   const navigation =
-    useNavigation<BottomTabNavigationProp<CustomerTabParamList>>();
+    useNavigation<
+      CompositeNavigationProp<
+        BottomTabNavigationProp<CustomerTabParamList>,
+        NativeStackNavigationProp<CustomerStackParamList>
+      >
+    >();
 
-  // Por ahora mostramos datos mockeados con selector interactivo de los 3 estados
-  const [selectedState, setSelectedState] =
-    React.useState<ConnectionStateMode>("active");
+  const simulateNotice = useServiceNoticeStore((state) => state.simulate);
+  const activeNotice = useServiceNoticeStore(selectActiveNotice);
+  const [deviceNotice, setDeviceNotice] = React.useState<UserNotice | null>(
+    null,
+  );
+  const [isSendingDeviceNotice, setIsSendingDeviceNotice] =
+    React.useState(false);
 
   const quoteQuery = useQuery({
     queryKey: ["account-quote"],
@@ -63,8 +94,14 @@ export const CustomerHomeScreen = () => {
   });
 
   const ticketQuery = useQuery({
-    queryKey: ["customer-open-ticket", profile?.userId],
-    queryFn: () => fetchCustomerOpenTicket(profile),
+    queryKey: customerOpenTicketQueryKey(profile?.userId),
+    queryFn: fetchCustomerOpenTicket,
+    enabled: Boolean(profile),
+  });
+
+  const faqQuery = useQuery({
+    queryKey: ["customer-faq-preview"],
+    queryFn: fetchHomeFaqPreview,
   });
 
   const isRefreshing = quoteQuery.isRefetching || ticketQuery.isRefetching;
@@ -74,12 +111,56 @@ export const CustomerHomeScreen = () => {
     void ticketQuery.refetch();
   };
 
+  const handleNoticeCta = (action: "chat" | "ticket" | "chat-confirm") => {
+    if (action === "ticket") {
+      navigation.navigate("Mi ticket");
+      return;
+    }
+    if (action === "chat-confirm") {
+      navigation.navigate("Chat", { intent: "confirm-connection" });
+      return;
+    }
+    navigation.navigate("Chat");
+  };
+
+  const handleSendToPhone = async () => {
+    if (!activeNotice || isSendingDeviceNotice) {
+      return;
+    }
+    setDeviceNotice(null);
+    setIsSendingDeviceNotice(true);
+    const result = await presentLocalServiceNotice(activeNotice);
+    setIsSendingDeviceNotice(false);
+    if (!result.ok) {
+      setDeviceNotice(result.notice);
+    }
+  };
+
   const quote = quoteQuery.data;
-  const openTicket = ticketQuery.data ?? MOCK_CUSTOMER_TICKET;
+  const openTicket = ticketQuery.data ?? null;
+  const openTicketWindow = openTicket
+    ? formatTicketWindowBreakdown(openTicket.windowStart, openTicket.windowEnd)
+    : null;
+  const linkState = resolveHomeLinkState(
+    activeNotice?.kind,
+    Boolean(quote?.serviceSuspended),
+  );
+  const linkChrome =
+    linkState === "fiber_cut" || linkState === "billing_cut"
+      ? chromeForSeverity("critical")
+      : linkState === "power_warning"
+        ? chromeForSeverity("warning")
+        : linkState === "zone_work"
+          ? chromeForSeverity("info")
+          : linkState === "restored"
+            ? chromeForSeverity("success")
+            : { ...chromeForSeverity("success"), label: "Activo" };
 
   // Datos mockeados de identidad de abonado
   const subscriberName =
-    profile?.displayName && profile.displayName !== "Abonado" && profile.displayName !== "Cliente"
+    profile?.displayName &&
+    profile.displayName !== "Abonado" &&
+    profile.displayName !== "Cliente"
       ? profile.displayName
       : "Carlos Silva";
   const subscriberCedula = profile?.loginCedula
@@ -97,427 +178,408 @@ export const CustomerHomeScreen = () => {
           refreshing={isRefreshing && !quoteQuery.isPending}
           onRefresh={handleRefresh}
         />
-      }
-    >
-      {/* 1. Header estilo Star Conectados */}
-      <View className="gap-3">
-        {/* Pill de red de fibra de alta velocidad con contraste dual light/dark */}
-        <View className="flex-row items-center justify-between gap-2">
-          <View className="flex-1 flex-row items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3.5 py-1.5 shadow-sm shadow-cyan-500/10 dark:bg-cyan-950/30">
-            <View className="size-2 rounded-full bg-cyan-500 shadow-sm shadow-cyan-400 dark:bg-cyan-400" />
-            <Text
-              numberOfLines={1}
-              className="flex-1 text-[10px] font-extrabold tracking-wider text-cyan-800 uppercase dark:text-cyan-300"
-            >
-              FIBRA ÓPTICA PURA · FTTH DIRECTA
-            </Text>
-          </View>
-
-          <Pressable
-            onPress={handleRefresh}
-            accessibilityRole="button"
-            accessibilityLabel="Actualizar estado de conexión"
-            className="shrink-0 flex-row items-center gap-1.5 rounded-full border border-border/80 bg-card/80 px-2.5 py-1.5"
-          >
-            <Icon as={RefreshCw} size={12} className="text-muted-foreground" />
-            <Text className="text-[10px] font-bold tracking-wider text-muted-foreground uppercase">
-              Actualizar
-            </Text>
-          </Pressable>
+      }>
+      {/* 1. Header Hero Oficial Conexiones Innover Flow */}
+      <View className="overflow-hidden rounded-3xl border border-border/80 bg-card/95 shadow-xl shadow-black/10">
+        {/* Franja de Acento Tricolor Oficial (Carmesí Innover -> Azul Cobalto -> Cian FTTH) */}
+        <View className="h-1.5 w-full flex-row">
+          <View className="h-full flex-1 bg-destructive" />
+          <View className="h-full flex-1 bg-primary" />
+          <View className="h-full flex-1 bg-cyan-400" />
         </View>
 
-        {/* Barra de acento degradado carmesí a azul cobalto (firma visual Star Conectados) */}
-        <View className="h-1 w-full overflow-hidden rounded-full bg-muted/40">
-          <View className="h-full w-full flex-row">
-            <View className="h-full flex-1 bg-destructive" />
-            <View className="h-full flex-1 bg-primary" />
-            <View className="h-full flex-1 bg-cyan-400" />
-          </View>
-        </View>
-
-        {/* Identidad del abonado */}
-        <View className="gap-1.5 pt-1">
-          <View className="flex-row items-center justify-between">
-            <Text variant="muted" className="text-xs font-bold tracking-widest uppercase">
-              INNOVER FLOW · PORTAL DE CLIENTES
-            </Text>
-            <Badge variant="outline" className="border-border/70 py-0.5">
-              <Text className="text-[10px] font-semibold text-muted-foreground">
-                {subscriberCedula}
+        <View className="p-4 gap-3.5">
+          {/* Fila Superior: Pill de Conexión + Cédula + Botón Actualizar */}
+          <View className="flex-row items-center justify-between gap-2">
+            <View className="flex-row items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 dark:bg-cyan-950/40">
+              <View className="size-2 rounded-full bg-cyan-500 shadow-sm shadow-cyan-400 dark:bg-cyan-400" />
+              <Text className="text-[10px] font-extrabold tracking-wider text-cyan-800 uppercase dark:text-cyan-300">
+                FIBRA ÓPTICA FTTH DIRECTA
               </Text>
-            </Badge>
+            </View>
+
+            <View className="flex-row items-center gap-1.5">
+              <Badge
+                variant="outline"
+                className="border-border/70 bg-muted/30 px-2.5 py-1">
+                <Text className="text-[10px] font-bold text-muted-foreground">
+                  {subscriberCedula}
+                </Text>
+              </Badge>
+
+              <Pressable
+                onPress={handleRefresh}
+                accessibilityRole="button"
+                accessibilityLabel="Actualizar estado de conexión"
+                hitSlop={8}
+                className="size-8 items-center justify-center rounded-full border border-border/80 bg-card active:bg-muted">
+                <Icon
+                  as={RefreshCw}
+                  size={13}
+                  className={
+                    isRefreshing ? "text-primary" : "text-muted-foreground"
+                  }
+                />
+              </Pressable>
+            </View>
           </View>
-          <Text className="text-2xl font-black tracking-tight text-foreground">
-            Hola, {subscriberName}
-          </Text>
-          <View className="flex-row items-center gap-2">
-            <Text variant="muted" className="text-xs">
-              Contrato: {contractNumber} · {zoneName}
+
+          {/* Bloque de Identidad y Saludo */}
+          <View className="gap-1">
+            <View className="flex-row items-center gap-1.5">
+              <View className="size-1.5 rounded-full bg-destructive" />
+              <Text className="text-[10px] font-extrabold tracking-widest text-primary uppercase">
+                INNOVER · PORTAL DE CLIENTES
+              </Text>
+            </View>
+
+            <Text className="text-2xl font-black tracking-tight text-foreground">
+              Hola, {subscriberName}
             </Text>
+
+            <View className="flex-row flex-wrap items-center gap-x-2 gap-y-1 pt-0.5">
+              <View className="flex-row items-center gap-1">
+                <Icon
+                  as={CheckCircle2}
+                  size={12}
+                  className="text-emerald-500"
+                />
+                <Text className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                  Conexión Activa
+                </Text>
+              </View>
+              <Text className="text-xs text-muted-foreground/60">•</Text>
+              <Text className="text-xs text-muted-foreground">
+                Contrato {contractNumber}
+              </Text>
+              <Text className="text-xs text-muted-foreground/60">•</Text>
+              <View className="flex-row items-center gap-1">
+                <Icon as={MapPin} size={11} className="text-muted-foreground" />
+                <Text
+                  className="text-xs text-muted-foreground"
+                  numberOfLines={1}>
+                  {zoneName}
+                </Text>
+              </View>
+            </View>
           </View>
         </View>
       </View>
 
       <ScreenState
         isLoading={quoteQuery.isPending}
-        errorMessage={
-          quoteQuery.isError ? "No se pudo cargar tu estado de cuenta." : null
+        errorNotice={
+          quoteQuery.isError
+            ? noticeFromUnknown(
+                quoteQuery.error,
+                "No se pudo cargar tu cuenta",
+              )
+            : null
         }
-        onRetry={handleRefresh}
-      >
+        onRetry={handleRefresh}>
         {quote ? (
           <View className="gap-5">
-            {/* 2. Chips de Telemetría de Red de Star Conectados */}
-            <View className="flex-row gap-2.5">
-              <View className="flex-1 rounded-2xl border border-border/80 bg-card/80 p-3 shadow-md shadow-black/10">
-                <View className="flex-row items-center gap-1.5">
-                  <Icon as={Zap} size={14} className="text-primary" />
-                  <Text className="text-[9px] font-extrabold text-muted-foreground uppercase">
-                    Latencia Red
-                  </Text>
-                </View>
-                <Text className="mt-1 text-base font-black text-foreground">
-                  &lt;14 ms
-                </Text>
-                <Text className="text-[9px] text-muted-foreground">Ping ultra bajo</Text>
-              </View>
-
-              <View className="flex-1 rounded-2xl border border-border/80 bg-card/80 p-3 shadow-md shadow-black/10">
-                <View className="flex-row items-center gap-1.5">
-                  <Icon as={Activity} size={14} className="text-cyan-600 dark:text-cyan-400" />
-                  <Text className="text-[9px] font-extrabold text-muted-foreground uppercase">
-                    Tecnología
-                  </Text>
-                </View>
-                <Text className="mt-1 text-base font-black text-foreground">
-                  100% FTTH
-                </Text>
-                <Text className="text-[9px] text-muted-foreground">Simetría 1:1</Text>
-              </View>
-
-              <View className="flex-1 rounded-2xl border border-border/80 bg-card/80 p-3 shadow-md shadow-black/10">
-                <View className="flex-row items-center gap-1.5">
-                  <Icon as={ShieldCheck} size={14} className="text-emerald-600 dark:text-emerald-400" />
-                  <Text className="text-[9px] font-extrabold text-muted-foreground uppercase">
-                    Disponibilidad
-                  </Text>
-                </View>
-                <Text className="mt-1 text-base font-black text-foreground">
-                  99.9%
-                </Text>
-                <Text className="text-[9px] text-muted-foreground">Uptime real</Text>
-              </View>
-            </View>
-
-            {/* Selector de simulación interactiva de los 3 estados requeridos */}
-            <View className="rounded-2xl border border-border/70 bg-card/70 p-3 gap-2">
-              <View className="flex-row items-center justify-between">
+            {__DEV__ ? (
+              <View className="rounded-2xl border border-border/70 bg-card/70 p-3 gap-2">
                 <Text className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">
-                  Simulación de Estado de Internet:
+                  Simular aviso de red (solo desarrollo)
                 </Text>
-                <Text className="text-[10px] text-muted-foreground">
-                  Toca para previsualizar
-                </Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {SERVICE_NOTICE_KINDS.map((kind) => {
+                    const chrome = chromeForSeverity(
+                      kind === "fiber_cut"
+                        ? "critical"
+                        : kind === "power_warning"
+                          ? "warning"
+                          : kind === "zone_work"
+                            ? "info"
+                            : "success",
+                    );
+                    const selected = activeNotice?.kind === kind;
+                    return (
+                      <Pressable
+                        key={kind}
+                        onPress={() => {
+                          setDeviceNotice(null);
+                          simulateNotice(kind);
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Simular ${SIMULATOR_LABEL[kind]}`}
+                        className={cn(
+                          "min-h-11 min-w-[46%] flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border px-2 py-2",
+                          selected ? chrome.card : "border-border/60 bg-muted/20",
+                        )}
+                      >
+                        <View className={cn("size-2 rounded-full", chrome.badge)} />
+                        <Text
+                          className={cn(
+                            "text-xs font-bold",
+                            selected ? chrome.title : "text-muted-foreground",
+                          )}
+                        >
+                          {SIMULATOR_LABEL[kind]}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Button
+                  className="mt-1 h-11 min-h-11 w-full flex-row items-center justify-center gap-2 rounded-xl"
+                  disabled={!activeNotice || isSendingDeviceNotice}
+                  onPress={() => {
+                    void handleSendToPhone();
+                  }}
+                  accessibilityLabel="Mostrar este aviso en las notificaciones del teléfono"
+                >
+                  <Icon as={Bell} size={16} className="text-primary-foreground" />
+                  <Text className="text-xs font-bold text-primary-foreground">
+                    {isSendingDeviceNotice
+                      ? "Enviando al teléfono…"
+                      : "Mostrar en el teléfono"}
+                  </Text>
+                </Button>
+                {deviceNotice ? (
+                  <Text className="text-[11px] leading-relaxed text-destructive">
+                    {deviceNotice.title}. {deviceNotice.description}
+                  </Text>
+                ) : (
+                  <Text className="text-[11px] leading-relaxed text-muted-foreground">
+                    {canPresentLocalServiceNotice()
+                      ? "Elige un aviso y tócalo para verlo en la bandeja de notificaciones del teléfono."
+                      : "La bandeja del teléfono no está disponible en Expo Go ni en el navegador. Ábrela en un development build."}
+                  </Text>
+                )}
               </View>
+            ) : null}
 
-              <View className="flex-row gap-2">
-                <Pressable
-                  onPress={() => setSelectedState("active")}
-                  accessibilityRole="button"
-                  accessibilityLabel="Ver estado Activo"
-                  className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border py-2 ${
-                    selectedState === "active"
-                      ? "border-emerald-500/80 bg-emerald-500/20"
-                      : "border-border/60 bg-muted/20"
-                  }`}
-                >
-                  <View className="size-2 rounded-full bg-emerald-500 dark:bg-emerald-400 shadow-sm shadow-emerald-400" />
-                  <Text
-                    className={`text-xs font-bold ${
-                      selectedState === "active"
-                        ? "text-emerald-700 dark:text-emerald-300"
-                        : "text-muted-foreground"
-                    }`}
-                  >
-                    Activo
-                  </Text>
-                </Pressable>
+            {activeNotice ? <ServiceNoticeRow notice={activeNotice} /> : null}
 
-                <Pressable
-                  onPress={() => setSelectedState("issue")}
-                  accessibilityRole="button"
-                  accessibilityLabel="Ver estado Con falla"
-                  className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border py-2 ${
-                    selectedState === "issue"
-                      ? "border-amber-500/80 bg-amber-500/20"
-                      : "border-border/60 bg-muted/20"
-                  }`}
-                >
-                  <View className="size-2 rounded-full bg-amber-500 dark:bg-amber-400 shadow-sm shadow-amber-400" />
-                  <Text
-                    className={`text-xs font-bold ${
-                      selectedState === "issue"
-                        ? "text-amber-700 dark:text-amber-300"
-                        : "text-muted-foreground"
-                    }`}
-                  >
-                    Con falla
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => setSelectedState("cut")}
-                  accessibilityRole="button"
-                  accessibilityLabel="Ver estado Cortado"
-                  className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border py-2 ${
-                    selectedState === "cut"
-                      ? "border-destructive/80 bg-destructive/20"
-                      : "border-border/60 bg-muted/20"
-                  }`}
-                >
-                  <View className="size-2 rounded-full bg-destructive shadow-sm shadow-destructive" />
-                  <Text
-                    className={`text-xs font-bold ${
-                      selectedState === "cut"
-                        ? "text-destructive"
-                        : "text-muted-foreground"
-                    }`}
-                  >
-                    Cortado
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-
-            {/* 3. TARJETA DE ESTADO DEL INTERNET (ACTIVO / CON FALLA / CORTADO) */}
             <Card
-              className={`overflow-hidden border-2 shadow-xl shadow-black/20 ${
-                selectedState === "cut"
-                  ? "border-destructive/70 bg-card"
-                  : selectedState === "issue"
-                    ? "border-amber-500/60 bg-card"
-                    : "border-emerald-500/50 bg-card"
-              }`}
-            >
-              {/* Franja luminosa superior */}
-              <View
-                className={`h-1.5 w-full ${
-                  selectedState === "cut"
-                    ? "bg-destructive"
-                    : selectedState === "issue"
-                      ? "bg-amber-500 dark:bg-amber-400"
-                      : "bg-emerald-500 dark:bg-emerald-400"
-                }`}
-              />
+              className={cn(
+                "overflow-hidden border-2 bg-card shadow-xl shadow-black/20",
+                linkState === "fiber_cut" || linkState === "billing_cut"
+                  ? "border-destructive/70"
+                  : linkState === "power_warning"
+                    ? "border-amber-500/60"
+                    : linkState === "zone_work"
+                      ? "border-primary/50"
+                      : "border-emerald-500/50",
+              )}>
+              <View className={cn("h-1.5 w-full", linkChrome.badge)} />
 
               <CardHeader className="gap-2">
-                {/* Header con flex-1 y shrink-0 para evitar cortes de texto */}
                 <View className="flex-row items-center justify-between gap-2">
                   <View className="flex-1 flex-row items-center gap-2">
-                    <Icon
-                      as={
-                        selectedState === "cut"
-                          ? WifiOff
-                          : selectedState === "issue"
-                            ? AlertTriangle
-                            : Wifi
-                      }
-                      size={18}
-                      className={
-                        selectedState === "cut"
-                          ? "text-destructive"
-                          : selectedState === "issue"
-                            ? "text-amber-600 dark:text-amber-400"
-                            : "text-emerald-600 dark:text-emerald-400"
-                      }
-                    />
+                    <InnoverIcon size={18} tone={linkChrome.tone} />
                     <CardTitle
                       className="text-sm font-black tracking-tight"
-                      numberOfLines={1}
-                    >
+                      numberOfLines={1}>
                       Estado de tu Conexión
                     </CardTitle>
                   </View>
-
-                  {/* Badge de estado conciso que nunca se trunca */}
-                  {selectedState === "cut" ? (
-                    <Badge variant="destructive" className="shrink-0 px-2.5 py-0.5">
-                      <Text className="text-[11px] font-bold">Cortado</Text>
-                    </Badge>
-                  ) : selectedState === "issue" ? (
-                    <View className="shrink-0 flex-row items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-2.5 py-0.5 dark:bg-amber-500/20">
-                      <View className="size-1.5 rounded-full bg-amber-500" />
-                      <Text className="text-[11px] font-bold text-amber-700 dark:text-amber-300">
-                        Con falla
-                      </Text>
-                    </View>
-                  ) : (
-                    <View className="shrink-0 flex-row items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-0.5 dark:bg-emerald-500/20">
-                      <View className="size-1.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500" />
-                      <Text className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                        Activo
-                      </Text>
-                    </View>
-                  )}
+                  <View
+                    className={cn(
+                      "shrink-0 flex-row items-center gap-1.5 rounded-full border px-2.5 py-0.5",
+                      linkChrome.card,
+                    )}>
+                    <View className={cn("size-1.5 rounded-full", linkChrome.badge)} />
+                    <Text className={cn("text-[11px] font-bold", linkChrome.title)}>
+                      {linkChrome.label}
+                    </Text>
+                  </View>
                 </View>
 
-                {/* Título de impacto según el estado */}
                 <Text
-                  className={`text-xl font-extrabold tracking-tight ${
-                    selectedState === "cut"
-                      ? "text-destructive"
-                      : selectedState === "issue"
-                        ? "text-amber-700 dark:text-amber-400"
-                        : "text-foreground"
-                  }`}
-                >
-                  {selectedState === "cut"
-                    ? "Servicio Temporalmente Suspendido"
-                    : selectedState === "issue"
-                      ? "Incidencia Técnica en tu Zona"
-                      : "Fibra Óptica Activa y Estable"}
+                  className={cn(
+                    "text-xl font-extrabold tracking-tight",
+                    linkChrome.title,
+                  )}>
+                  {activeNotice?.title ??
+                    (linkState === "billing_cut"
+                      ? "Servicio temporalmente suspendido"
+                      : "Fibra óptica activa y estable")}
                 </Text>
 
                 <CardDescription className="text-xs leading-relaxed text-muted-foreground">
-                  {selectedState === "cut"
-                    ? "Tu servicio de internet se encuentra pausado temporalmente por factura vencida. Al reportar y confirmar tu comprobante de pago, la reconexión se realiza de manera inmediata."
-                    : selectedState === "issue"
-                      ? "Hemos registrado un reporte técnico en tu sector en Valencia. Nuestro equipo técnico especializado ya se encuentra gestionándolo en la caja NAP."
-                      : "Tu conexión de fibra óptica simétrica FTTH está transmitiendo a máxima velocidad sin pérdidas de paquetes. Todo tu hogar u oficina cuenta con navegación ilimitada."}
+                  {activeNotice?.body ??
+                    (linkState === "billing_cut"
+                      ? "Tu servicio está pausado por factura vencida. Al reportar el comprobante, la reconexión queda en revisión."
+                      : "Tu conexión de fibra óptica FTTH está transmitiendo sin pérdidas de paquetes.")}
                 </CardDescription>
               </CardHeader>
 
               <CardContent className="gap-3 pt-0">
-                {/* 1. Estado CORTADO */}
-                {selectedState === "cut" ? (
-                  <View className="rounded-xl border border-destructive/30 bg-destructive/10 p-3.5 gap-2">
-                    <View className="flex-row items-center gap-1.5">
-                      <Icon as={AlertCircle} size={15} className="text-destructive" />
-                      <Text className="text-xs font-bold text-destructive">
-                        Acción requerida para reconexión inmediata:
-                      </Text>
-                    </View>
-                    <Text className="text-xs text-muted-foreground leading-relaxed">
-                      Saldo pendiente: {quote.debtUsdFormatted} ({quote.debtBsFormatted ?? "en Bs según BCV"}).
-                      Al reportar tu pago móvil o transferencia, el sistema procesa el desbloqueo.
+                {linkState === "billing_cut" ? (
+                  <View className="gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3.5">
+                    <Text className="text-xs font-bold text-destructive">
+                      Acción requerida para reconexión
+                    </Text>
+                    <Text className="text-xs leading-relaxed text-muted-foreground">
+                      Saldo pendiente: {quote.debtUsdFormatted} (
+                      {quote.debtBsFormatted ?? "en Bs según BCV"}).
                     </Text>
                     <Button
-                      className="mt-1 min-h-12 h-12 w-full flex-row items-center justify-center gap-2 rounded-xl bg-destructive active:opacity-90 shadow-md shadow-destructive/30"
+                      className="mt-1 h-12 min-h-12 w-full flex-row items-center justify-center gap-2 rounded-xl bg-destructive"
                       onPress={() => navigation.navigate("Facturación")}
-                      accessibilityLabel="Reportar pago para reconectar"
-                    >
-                      <Icon as={CreditCard} size={16} className="text-destructive-foreground" />
-                      <Text className="text-xs font-bold text-destructive-foreground uppercase tracking-wider">
+                      accessibilityLabel="Reportar pago para reconectar">
+                      <Icon
+                        as={CreditCard}
+                        size={16}
+                        className="text-destructive-foreground"
+                      />
+                      <Text className="text-xs font-bold uppercase tracking-wider text-destructive-foreground">
                         Reportar pago para reconectar
                       </Text>
-                      <Icon as={ArrowRight} size={15} className="text-destructive-foreground" />
                     </Button>
                   </View>
-                ) : selectedState === "issue" ? (
-                  /* 2. Estado CON FALLA */
-                  <View className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 gap-2.5 dark:bg-amber-950/20">
-                    <View className="flex-row items-center justify-between">
-                      <View className="flex-row items-center gap-1.5">
-                        <Icon as={Ticket} size={15} className="text-amber-600 dark:text-amber-400" />
-                        <Text className="text-xs font-bold text-amber-700 dark:text-amber-300">
-                          Caso #{openTicket.wisproPublicId ?? 4082}
-                        </Text>
-                      </View>
-                      <Badge variant="outline" className="border-amber-500/40">
-                        <Text className="text-[10px] text-amber-700 dark:text-amber-300">
-                          {ticketStatusLabel(openTicket.status)}
-                        </Text>
-                      </Badge>
-                    </View>
+                ) : null}
 
-                    <Text className="text-xs font-semibold text-foreground">
-                      {openTicket.title}
-                    </Text>
-
-                    <View className="gap-1 border-t border-amber-500/20 pt-2">
-                      <View className="flex-row items-center gap-1.5">
-                        <Icon as={UserCheck} size={12} className="text-amber-600 dark:text-amber-400" />
-                        <Text className="text-[11px] text-muted-foreground">
-                          Técnico asignado: <Text className="font-bold text-foreground">{openTicket.employeeName ?? "Jesús Rojas"}</Text>
-                        </Text>
-                      </View>
-
-                      <View className="flex-row items-center gap-1.5">
-                        <Icon as={Clock} size={12} className="text-amber-600 dark:text-amber-400" />
-                        <Text className="text-[11px] text-muted-foreground">
-                          Ventana de visita: <Text className="font-bold text-foreground">Hoy 9:00 AM - 12:00 PM</Text>
-                        </Text>
-                      </View>
-
-                      <View className="flex-row items-center gap-1.5">
-                        <Icon as={MapPin} size={12} className="text-amber-600 dark:text-amber-400" />
-                        <Text className="text-[11px] text-muted-foreground">
-                          Sector: <Text className="font-bold text-foreground">{openTicket.addressText ?? "Valencia · El Parral"}</Text>
-                        </Text>
-                      </View>
-                    </View>
-
-                    <Button
-                      variant="outline"
-                      className="mt-1 min-h-11 h-11 w-full flex-row items-center justify-center gap-2 rounded-xl border-amber-500/40 bg-amber-500/10 active:opacity-90 dark:bg-amber-950/30"
-                      onPress={() => navigation.navigate("Mi ticket")}
-                      accessibilityLabel="Ver seguimiento del ticket"
-                    >
-                      <Icon as={Ticket} size={15} className="text-amber-700 dark:text-amber-300" />
-                      <Text className="text-xs font-bold text-amber-700 dark:text-amber-300">
-                        Ver seguimiento de mi ticket
+                {linkState === "fiber_cut" ||
+                linkState === "power_warning" ||
+                linkState === "zone_work" ||
+                linkState === "restored" ? (
+                  <View className={cn("gap-2.5 rounded-xl border p-3.5", linkChrome.card)}>
+                    {linkState === "power_warning" && openTicket ? (
+                      <Text className={cn("text-xs font-bold", linkChrome.title)}>
+                        {openTicket.wisproPublicId != null
+                          ? `Visita #${openTicket.wisproPublicId}`
+                          : "Visita técnica"}{" "}
+                        ·{" "}
+                        {displayTicketStatus(
+                          openTicket.status,
+                          openTicket.statusLabel,
+                        )}
                       </Text>
-                      <Icon as={ArrowRight} size={15} className="text-amber-700 dark:text-amber-300" />
-                    </Button>
+                    ) : null}
+                    {activeNotice?.cta ? (
+                      <Button
+                        variant="outline"
+                        className="h-11 min-h-11 w-full flex-row items-center justify-center gap-2 rounded-xl"
+                        onPress={() => {
+                          const cta = activeNotice.cta;
+                          if (!cta) {
+                            return;
+                          }
+                          handleNoticeCta(cta.action);
+                        }}
+                        accessibilityLabel={activeNotice.cta.label}>
+                        <Text className={cn("text-xs font-bold", linkChrome.title)}>
+                          {activeNotice.cta.label}
+                        </Text>
+                        <Icon
+                          as={ArrowRight}
+                          size={15}
+                          className={linkChrome.title}
+                        />
+                      </Button>
+                    ) : null}
+                    {linkState === "power_warning" ? (
+                      <Button
+                        variant="outline"
+                        className="h-11 min-h-11 w-full flex-row items-center justify-center gap-2 rounded-xl"
+                        onPress={() => navigation.navigate("Mi ticket")}
+                        accessibilityLabel="Ver seguimiento del ticket">
+                        <Icon as={Ticket} size={15} className={linkChrome.title} />
+                        <Text className={cn("text-xs font-bold", linkChrome.title)}>
+                          Ver seguimiento de mi ticket
+                        </Text>
+                      </Button>
+                    ) : null}
                   </View>
-                ) : (
-                  /* 3. Estado ACTIVO (Layout corregido: sin colisión ni saltos raros) */
-                  <View className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 gap-2.5 dark:bg-emerald-950/20">
+                ) : null}
+
+                {linkState === "active" ? (
+                  <View className="gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 dark:bg-emerald-950/20">
                     <View className="flex-row flex-wrap items-center gap-2">
                       <View className="flex-row items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-2.5 py-1">
-                        <Icon as={CheckCircle2} size={13} className="text-emerald-600 dark:text-emerald-400" />
+                        <Icon
+                          as={CheckCircle2}
+                          size={13}
+                          className="text-emerald-600 dark:text-emerald-400"
+                        />
                         <Text className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                          Simetría 1:1 Activa
-                        </Text>
-                      </View>
-
-                      <View className="rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-2.5 py-1">
-                        <Text className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                          0% Pérdida de paquetes
+                          Simetría 1:1 activa
                         </Text>
                       </View>
                     </View>
-
                     <Text className="text-[11px] leading-relaxed text-muted-foreground">
-                      Enrutamiento directo y optimizado a servidores de baja latencia para gaming competitivo, streaming 4K HDR y videollamadas sin cortes.
+                      Enrutamiento directo para navegación estable en tu hogar.
                     </Text>
-
-                    {/* Telemetría local con columnas limpias (etiqueta arriba, valor abajo) */}
-                    <View className="flex-row items-center justify-between border-t border-emerald-500/20 pt-2.5">
-                      <View className="gap-0.5">
-                        <Text className="text-[10px] font-semibold text-muted-foreground uppercase">
-                          Dispositivos activos
-                        </Text>
-                        <Text className="text-xs font-black text-foreground">
-                          8 equipos en línea
-                        </Text>
-                      </View>
-
-                      <View className="items-end gap-0.5">
-                        <Text className="text-[10px] font-semibold text-muted-foreground uppercase">
-                          Dirección IP ONT
-                        </Text>
-                        <Text className="text-xs font-black text-foreground">
-                          190.202.88.45
-                        </Text>
-                      </View>
-                    </View>
                   </View>
-                )}
+                ) : null}
               </CardContent>
             </Card>
 
-            {/* 4. SALDO PENDIENTE & FACTURACIÓN (Inversión mensual Star Conectados) */}
+            {ticketQuery.isError ? (
+              <Alert icon={Info}>
+                <AlertTitle>No se pudo cargar tu visita</AlertTitle>
+                <AlertDescription>
+                  {
+                    noticeFromUnknown(
+                      ticketQuery.error,
+                      "No se pudieron cargar tus visitas",
+                    ).description
+                  }
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {openTicket ? (
+              <Card className="overflow-hidden border-2 border-primary/40 bg-card/95 shadow-xl shadow-black/10">
+                <View className="h-1.5 w-full bg-primary" />
+                <CardHeader className="gap-2">
+                  <View className="flex-row items-center justify-between gap-2">
+                    <View className="flex-row items-center gap-2">
+                      <Icon as={Ticket} size={18} className="text-primary" />
+                      <CardTitle className="text-base font-bold">
+                        Visita técnica
+                      </CardTitle>
+                    </View>
+                    <Badge variant="outline" className="border-primary/40 bg-primary/10">
+                      <Text className="text-[10px] font-bold text-primary">
+                        {displayTicketStatus(
+                          openTicket.status,
+                          openTicket.statusLabel,
+                        )}
+                      </Text>
+                    </Badge>
+                  </View>
+                  <CardDescription className="text-xs">
+                    {openTicket.wisproPublicId != null
+                      ? `Visita #${openTicket.wisproPublicId}`
+                      : "Seguimiento de tu caso de campo"}
+                  </CardDescription>
+                  <Text className="text-sm font-bold text-foreground">
+                    {openTicket.title}
+                  </Text>
+                </CardHeader>
+                <CardContent className="gap-3 pt-0">
+                  <Text className="text-xs text-muted-foreground">
+                    {openTicketWindow
+                      ? `${openTicketWindow.dateLabel} · ${openTicketWindow.hoursLabel}`
+                      : "Horario por confirmar cuando el CRM agende la visita."}
+                  </Text>
+                  {openTicket.employeeName ? (
+                    <Text className="text-xs text-muted-foreground">
+                      Técnico: {openTicket.employeeName}
+                    </Text>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    className="h-11 min-h-11 w-full flex-row items-center justify-center gap-2 rounded-xl"
+                    onPress={() => navigation.navigate("Mi ticket")}
+                    accessibilityLabel="Ver seguimiento del ticket">
+                    <Icon as={Ticket} size={15} className="text-primary" />
+                    <Text className="text-xs font-bold text-primary">
+                      Ver seguimiento
+                    </Text>
+                    <Icon as={ArrowRight} size={15} className="text-primary" />
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {/* 4. SALDO PENDIENTE & FACTURACIÓN (Inversión mensual Conexiones Innover) */}
             <Card className="border-border/80 bg-card/90 shadow-xl shadow-black/15">
               <CardHeader className="gap-1.5">
                 <View className="flex-row items-center justify-between">
@@ -564,7 +626,8 @@ export const CustomerHomeScreen = () => {
                   <Alert icon={Info}>
                     <AlertTitle>Oficina fuera de horario</AlertTitle>
                     <AlertDescription>
-                      Puedes registrar tu pago las 24 horas. La validación humana se realiza en horario de oficina
+                      Puedes registrar tu pago las 24 horas. La validación
+                      humana se realiza en horario de oficina
                       {quote.nextOpenLabel
                         ? ` (próxima apertura: ${quote.nextOpenLabel})`
                         : "."}
@@ -577,13 +640,20 @@ export const CustomerHomeScreen = () => {
                   <Button
                     className="min-h-12 h-12 w-full flex-row items-center justify-center gap-2 rounded-xl bg-primary shadow-lg shadow-primary/30 active:opacity-90"
                     onPress={() => navigation.navigate("Facturación")}
-                    accessibilityLabel="Pagar servicio o enviar comprobante"
-                  >
-                    <Icon as={CreditCard} size={16} className="text-primary-foreground" />
+                    accessibilityLabel="Pagar servicio o enviar comprobante">
+                    <Icon
+                      as={CreditCard}
+                      size={16}
+                      className="text-primary-foreground"
+                    />
                     <Text className="text-xs font-bold text-primary-foreground uppercase tracking-wider">
-                      Pagar servicio / Enviar comprobante
+                      Pagar servicio
                     </Text>
-                    <Icon as={ArrowRight} size={16} className="text-primary-foreground" />
+                    <Icon
+                      as={ArrowRight}
+                      size={16}
+                      className="text-primary-foreground"
+                    />
                   </Button>
 
                   <Button
@@ -592,18 +662,37 @@ export const CustomerHomeScreen = () => {
                     onPress={() =>
                       navigation.navigate("Chat", { intent: "report-outage" })
                     }
-                    accessibilityLabel="Reportar falla técnica"
-                  >
-                    <Icon as={AlertTriangle} size={15} className="text-muted-foreground" />
+                    accessibilityLabel="Reportar falla técnica">
+                    <Icon
+                      as={AlertTriangle}
+                      size={15}
+                      className="text-muted-foreground"
+                    />
                     <Text className="text-xs font-semibold text-foreground">
                       Reportar falla técnica
                     </Text>
                   </Button>
+
+                  <Button
+                    variant="outline"
+                    className="min-h-11 h-11 w-full flex-row items-center justify-center gap-2 rounded-xl border-primary/40 bg-primary/5 active:opacity-90"
+                    onPress={() => navigation.navigate("Chat")}
+                    accessibilityLabel="Asesoría disponible las 24 horas"
+                  >
+                    <Icon as={Headphones} size={15} className="text-primary" />
+                    <Text className="text-xs font-semibold text-primary">
+                      Asesoría disponible 24/7
+                    </Text>
+                  </Button>
+                  <Text className="text-center text-[10px] text-muted-foreground">
+                    Nova te atiende a cualquier hora. Un asesor humano revisa en
+                    horario de oficina.
+                  </Text>
                 </View>
               </CardContent>
             </Card>
 
-            {/* 5. PLAN CONTRATADO (Inspirado en la Tarjeta de Planes de Star Conectados) */}
+            {/* 5. PLAN CONTRATADO (Inspirado en la Tarjeta de Planes de Conexiones Innover) */}
             <Card className="overflow-hidden border-border/80 bg-card/95 shadow-xl shadow-black/15">
               {/* Franja de destaque cósmico */}
               <View className="h-1 w-full bg-primary" />
@@ -624,7 +713,8 @@ export const CustomerHomeScreen = () => {
                   Plan Hogar Pro · 200 Mbps
                 </CardTitle>
                 <CardDescription className="text-xs text-muted-foreground">
-                  Conexión ultra rápida y simétrica con tecnología FTTH directa para tu inmueble.
+                  Conexión ultra rápida y simétrica con tecnología FTTH directa
+                  para tu inmueble.
                 </CardDescription>
               </CardHeader>
 
@@ -648,7 +738,8 @@ export const CustomerHomeScreen = () => {
                     </View>
                   </View>
                   <Text className="mt-1 text-[11px] text-muted-foreground">
-                    Misma velocidad para descarga y subida de archivos de gran tamaño.
+                    Misma velocidad para descarga y subida de archivos de gran
+                    tamaño.
                   </Text>
 
                   {/* Equipamiento y nodo con layout seguro: sin superposición de textos */}
@@ -697,7 +788,11 @@ export const CustomerHomeScreen = () => {
                   ].map((benefit, index) => (
                     <View key={index} className="flex-row items-start gap-2.5">
                       <View className="mt-0.5 size-4 items-center justify-center rounded-full bg-emerald-500/20">
-                        <Icon as={Check} size={11} className="text-emerald-600 dark:text-emerald-400" />
+                        <Icon
+                          as={Check}
+                          size={11}
+                          className="text-emerald-600 dark:text-emerald-400"
+                        />
                       </View>
                       <Text className="flex-1 text-xs leading-relaxed text-foreground">
                         {benefit}
@@ -711,70 +806,67 @@ export const CustomerHomeScreen = () => {
                   variant="outline"
                   className="min-h-11 h-11 w-full flex-row items-center justify-center gap-2 rounded-xl border-border/80 active:opacity-90"
                   onPress={() => navigation.navigate("Contrato")}
-                  accessibilityLabel="Ver contrato y especificaciones técnicas"
-                >
-                  <Icon as={FileText} size={15} className="text-muted-foreground" />
+                  accessibilityLabel="Ver contrato y especificaciones técnicas">
+                  <Icon
+                    as={FileText}
+                    size={15}
+                    className="text-muted-foreground"
+                  />
                   <Text className="text-xs font-semibold text-foreground">
                     Ver contrato y especificaciones
                   </Text>
-                  <Icon as={ArrowRight} size={14} className="text-muted-foreground" />
+                  <Icon
+                    as={ArrowRight}
+                    size={14}
+                    className="text-muted-foreground"
+                  />
                 </Button>
               </CardContent>
             </Card>
 
-            {/* 6. Casos de uso optimizados (Star Conectados: "¿Qué quieres hacer hoy?") */}
             <View className="gap-2.5">
-              <Text className="text-xs font-extrabold tracking-wider text-muted-foreground uppercase">
-                Red Optimizada para tu Día a Día
-              </Text>
-              <View className="flex-row gap-2.5">
-                <View className="flex-1 rounded-xl border border-border/70 bg-card/60 p-3">
-                  <Text className="text-xs font-extrabold text-foreground">
-                    Gaming Competitivo
+              <View className="flex-row items-center justify-between">
+                <Text className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
+                  Preguntas frecuentes
+                </Text>
+                <Pressable
+                  onPress={() => navigation.navigate("Ayuda")}
+                  accessibilityRole="button"
+                  accessibilityLabel="Ver todas las preguntas frecuentes"
+                  className="min-h-11 flex-row items-center gap-1 px-1"
+                >
+                  <Text className="text-xs font-bold text-primary">
+                    Ver todas
                   </Text>
-                  <Text className="mt-0.5 text-[10px] text-muted-foreground">
-                    Ping &lt;15ms · 0% Packet Loss
-                  </Text>
-                </View>
-
-                <View className="flex-1 rounded-xl border border-border/70 bg-card/60 p-3">
-                  <Text className="text-xs font-extrabold text-foreground">
-                    Streaming 4K UHD
-                  </Text>
-                  <Text className="mt-0.5 text-[10px] text-muted-foreground">
-                    0 seg de buffering sin pausas
-                  </Text>
-                </View>
+                  <Icon as={ChevronRight} size={14} className="text-primary" />
+                </Pressable>
               </View>
 
-              <View className="flex-row gap-2.5">
-                <View className="flex-1 rounded-xl border border-border/70 bg-card/60 p-3">
-                  <Text className="text-xs font-extrabold text-foreground">
-                    Home Office & Nube
+              {(faqQuery.data ?? []).map((item) => (
+                <Pressable
+                  key={item.id}
+                  onPress={() => navigation.navigate("Ayuda", { faqId: item.id })}
+                  accessibilityRole="button"
+                  accessibilityLabel={item.question}
+                  className="min-h-14 flex-row items-center gap-3 rounded-2xl border border-border/80 bg-card px-3.5 py-3 active:bg-muted/40"
+                >
+                  <View className="size-9 items-center justify-center rounded-full bg-primary/10">
+                    <Icon as={HelpCircle} size={16} className="text-primary" />
+                  </View>
+                  <Text className="flex-1 text-sm font-semibold text-foreground">
+                    {item.question}
                   </Text>
-                  <Text className="mt-0.5 text-[10px] text-muted-foreground">
-                    100% Subida simétrica para videollamadas
-                  </Text>
-                </View>
-
-                <View className="flex-1 rounded-xl border border-border/70 bg-card/60 p-3">
-                  <Text className="text-xs font-extrabold text-foreground">
-                    Hogar Inteligente
-                  </Text>
-                  <Text className="mt-0.5 text-[10px] text-muted-foreground">
-                    30+ dispositivos en simultáneo
-                  </Text>
-                </View>
-              </View>
+                  <Icon as={ChevronRight} size={16} className="text-muted-foreground" />
+                </Pressable>
+              ))}
             </View>
 
-            {/* 7. Footer de marca sutil */}
             <View className="items-center gap-1 py-4">
               <Text className="text-[11px] font-bold text-muted-foreground">
                 Conexiones Innover C.A. · Red de Fibra Óptica FTTH
               </Text>
               <Text className="text-[10px] text-muted-foreground/70">
-                Tu conexión sin límites. Estabilidad garantizada por fibra directa.
+                Cobertura nacional. Estabilidad garantizada por fibra directa.
               </Text>
             </View>
           </View>

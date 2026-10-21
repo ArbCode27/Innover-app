@@ -1,6 +1,8 @@
+/**
+ * Mock aislado. El Chat de producción usa `app-chat-gateway` (REST).
+ * No inserta en `messages`. TODO(channel=app) vive en `channel-app-ingress`.
+ */
 import { notifyChannelAppIngress } from "@/lib/channel-app-ingress";
-import { hasSupabasePublicEnv } from "@/lib/supabase-env";
-import { getSupabaseBrowserClient } from "@/lib/supabase";
 import type { AppMessage, OutboundClientDraft } from "@/types/domain";
 
 export const APP_CONVERSATION_ID = 9001;
@@ -34,7 +36,7 @@ let messages: AppMessage[] = [
     conversationId: APP_CONVERSATION_ID,
     type: "out",
     content:
-      "¡Con mucho gusto! 🚀 Tu servicio de Fibra Óptica 200 Mbps en Valencia se encuentra 100% activo con una latencia de 14 ms sin pérdidas de paquetes.\n\nTu saldo pendiente actual es de $30,00 (Bs. 26.141,07 a tasa oficial BCV de 871,37 Bs/$). Puedes realizar tu pago por Pago Móvil o Zelle y adjuntar el capture directamente por aquí o en la pestaña Facturación.",
+      "¡Con mucho gusto! 🚀 Tu servicio de Fibra Óptica 200 Mbps en Valencia se encuentra 100% activo con una latencia de 14 ms sin pérdidas de paquetes.\n\nTu saldo pendiente actual es de $30,00 (Bs. 26.141,07 a tasa oficial BCV de 871,37 Bs/$). Puedes realizar tu pago por Pago Móvil o Zelle y adjuntar el capture directamente por aquí o desde Inicio.",
     senderType: "bot",
     sentBy: "Nova",
     status: "sent",
@@ -66,37 +68,6 @@ let messages: AppMessage[] = [
 
 const cloneMessages = () => messages.map((message) => ({ ...message }));
 
-const tryInsertCrmMessage = async (message: AppMessage) => {
-  if (!hasSupabasePublicEnv()) {
-    return;
-  }
-  if (message.conversationId === APP_CONVERSATION_ID) {
-    return;
-  }
-
-  try {
-    const supabase = getSupabaseBrowserClient();
-    await supabase.from("messages").insert({
-      conversation_id: message.conversationId,
-      type: "in",
-      content: message.content,
-      sender_type: "client",
-      sent_by: null,
-      status: "sent",
-      media_url: message.mediaUrl ?? null,
-      media_type: message.mediaType ?? null,
-      mime_type: message.mimeType ?? null,
-      caption: message.caption ?? null,
-      latitude: message.latitude ?? null,
-      longitude: message.longitude ?? null,
-      location_name: message.locationName ?? null,
-      metadata: { channel: "app" },
-    });
-  } catch {
-    return;
-  }
-};
-
 export const fetchConversationMessages = async (): Promise<AppMessage[]> => {
   await new Promise((resolve) => setTimeout(resolve, 180));
   return cloneMessages();
@@ -124,7 +95,6 @@ export const sendClientDraft = async (
   };
   nextId += 1;
   messages = [...messages, inbound];
-  await tryInsertCrmMessage(inbound);
 
   const result = await notifyChannelAppIngress({
     conversationId: APP_CONVERSATION_ID,

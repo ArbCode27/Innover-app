@@ -1,8 +1,10 @@
 import { AppProviders } from "@/app/providers";
 import { RootNavigator } from "@/app/navigation";
+import { navigationRef } from "@/app/navigation-ref";
 import { NAV_THEME } from "@/lib/theme";
 import { NavigationContainer } from "@react-navigation/native";
 import { PortalHost } from "@rn-primitives/portal";
+import * as SplashScreen from "expo-splash-screen";
 import { useColorScheme } from "nativewind";
 import * as React from "react";
 import { View } from "react-native";
@@ -13,11 +15,14 @@ export const Root = () => {
   const { colorScheme, setColorScheme } = useColorScheme();
 
   React.useEffect(() => {
-    // Si no hay preferencia explícita guardada, usar el modo oscuro cósmico por defecto
     if (!colorScheme) {
       setColorScheme("dark");
     }
   }, [colorScheme, setColorScheme]);
+
+  React.useEffect(() => {
+    void SplashScreen.hideAsync();
+  }, []);
 
   const scheme = colorScheme === "light" ? "light" : "dark";
 
@@ -26,7 +31,7 @@ export const Root = () => {
       <SafeAreaProvider>
         <View className={`flex-1 ${scheme === "dark" ? "dark" : ""}`}>
           <AppProviders>
-            <NavigationContainer theme={NAV_THEME[scheme]}>
+            <NavigationContainer ref={navigationRef} theme={NAV_THEME[scheme]}>
               <RootNavigator />
             </NavigationContainer>
             <PortalHost />

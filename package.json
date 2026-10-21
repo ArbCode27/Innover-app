@@ -9,10 +9,7 @@
     "android": "pnpm --filter mobile android",
     "ios": "pnpm --filter mobile ios",
     "typecheck": "pnpm --filter mobile typecheck",
-    "lint": "pnpm --filter mobile lint"
-  },
-  "dependencies": {
-    "expo-local-authentication": "~57.0.3",
-    "expo-secure-store": "~57.0.4"
+    "lint": "pnpm --filter mobile lint",
+    "build:android:preview": "pnpm --filter mobile build:android:preview"
   }
 }

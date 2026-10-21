@@ -2,6 +2,8 @@ import {
   clearBiometricSession,
   loadBiometricCedula,
   loadBiometricSession,
+  loadBiometricsEnabled,
+  loadSession,
   saveBiometricSession,
 } from "@/lib/session-storage";
 import type { AppChannelSession } from "@/types/app-channel";
@@ -26,12 +28,13 @@ export const checkBiometricStatus = async (): Promise<BiometricStatus> => {
       : false;
     const savedCedula = await loadBiometricCedula();
     const savedSession = await loadBiometricSession();
+    const bioEnabled = await loadBiometricsEnabled();
 
     return {
       isHardwareAvailable,
       isEnrolled,
       savedCedula,
-      hasSavedSession: Boolean(savedSession),
+      hasSavedSession: bioEnabled && Boolean(savedSession),
     };
   } catch {
     return {
@@ -65,7 +68,8 @@ export const authenticateWithBiometrics = async (
       };
     }
 
-    const savedSession = await loadBiometricSession();
+    const savedSession =
+      (await loadSession()) ?? (await loadBiometricSession());
     if (!savedSession) {
       return {
         ok: false,

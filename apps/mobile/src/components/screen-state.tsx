@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Text } from "@/components/ui/text";
+import type { UserNotice } from "@/lib/user-notice";
 import type { ReactNode } from "react";
 import { View } from "react-native";
 
@@ -9,6 +10,7 @@ type ScreenStateProps = {
   isEmpty?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
+  errorNotice?: UserNotice | null;
   errorMessage?: string | null;
   onRetry?: () => void;
   children: ReactNode;
@@ -19,10 +21,17 @@ export const ScreenState = ({
   isEmpty = false,
   emptyTitle = "No hay información",
   emptyDescription = "Cuando haya datos, aparecerán aquí.",
+  errorNotice,
   errorMessage,
   onRetry,
   children,
 }: ScreenStateProps) => {
+  const resolvedError =
+    errorNotice ??
+    (errorMessage
+      ? { title: "No se pudo cargar", description: errorMessage }
+      : null);
+
   if (isLoading) {
     return (
       <View className="gap-3 p-4" accessibilityLabel="Cargando">
@@ -33,14 +42,14 @@ export const ScreenState = ({
     );
   }
 
-  if (errorMessage) {
+  if (resolvedError) {
     return (
       <View className="flex-1 items-center justify-center gap-3 p-6">
         <Text variant="h4" className="text-center">
-          No se pudo cargar
+          {resolvedError.title}
         </Text>
         <Text variant="muted" className="text-center">
-          {errorMessage}
+          {resolvedError.description}
         </Text>
         {onRetry ? (
           <Button

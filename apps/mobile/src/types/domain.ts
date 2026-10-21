@@ -55,6 +55,35 @@ export type AccountQuote = {
   nextOpenLabel: string | null;
   planName: string | null;
   zone: string | null;
+  periodLabel: string | null;
+  dueHint: string | null;
+};
+
+export type PaymentMethodId =
+  | "pago_movil"
+  | "transferencia"
+  | "deposito"
+  | "deposito_usd";
+
+export type PaymentCopyField = {
+  label: string;
+  value: string;
+};
+
+export type PaymentMethodOption = {
+  id: PaymentMethodId;
+  title: string;
+  description: string | null;
+};
+
+export type PaymentInstructions = {
+  methodId: PaymentMethodId;
+  methodTitle: string;
+  bankName: string;
+  confirmAmountLabel: string;
+  amountLine: string;
+  fields: PaymentCopyField[];
+  updatedAtLabel: string;
 };
 
 export type ContractSnapshot = {
@@ -74,7 +103,7 @@ export type AppMessage = {
   content: string;
   senderType: MessageSenderType;
   sentBy: string | null;
-  status: "pending" | "sent" | "failed";
+  status: "pending" | "sent" | "delivered" | "read" | "failed";
   createdAt: string;
   mediaType?: MessageMediaType | null;
   mediaUrl?: string | null;
@@ -83,6 +112,7 @@ export type AppMessage = {
   latitude?: number | null;
   longitude?: number | null;
   locationName?: string | null;
+  locationAddress?: string | null;
 };
 
 export type OutboundClientDraft = {
@@ -118,6 +148,11 @@ export type AppCaso = {
   employeeId: string | null;
   employeeName: string | null;
   closedAt: string | null;
+  technicianPhone?: string | null;
+  description?: string | null;
+  kindLabel?: string | null;
+  statusLabel?: string | null;
+  priorityLabel?: string | null;
 };
 
 export type TeamTicketFilter = "pending" | "done" | "today";
@@ -125,4 +160,43 @@ export type TeamTicketFilter = "pending" | "done" | "today";
 export type TechnicianDirectoryEntry = {
   id: string;
   name: string;
+};
+
+export type FaqItem = {
+  id: string;
+  question: string;
+  answer: string;
+};
+
+export type AppDevicePlatform = "android" | "ios" | "web";
+
+export type AppDevice = {
+  id: string;
+  platform: AppDevicePlatform;
+  label: string;
+  lastSeenAt: string;
+  isCurrent: boolean;
+};
+
+export type ServiceNoticeKind =
+  | "fiber_cut"
+  | "power_warning"
+  | "zone_work"
+  | "service_restored";
+
+export type ServiceNoticeSeverity = "critical" | "warning" | "info" | "success";
+
+export type ServiceNoticeCtaAction = "chat" | "ticket" | "chat-confirm";
+
+export type ServiceNotice = {
+  id: string;
+  kind: ServiceNoticeKind;
+  severity: ServiceNoticeSeverity;
+  title: string;
+  body: string;
+  createdAt: string;
+  cta?: {
+    label: string;
+    action: ServiceNoticeCtaAction;
+  };
 };

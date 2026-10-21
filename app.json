@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Innover",
+    "name": "Star Conectados",
     "slug": "innover-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -23,7 +23,10 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT"
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
@@ -57,7 +60,20 @@
           "recordAudioAndroid": true
         }
       ],
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#336CFF",
+          "defaultChannel": "innover-info"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e38c8987-e7bd-4fdc-b5a0-beda05129941"
+      }
+    },
+    "owner": "innover"
   }
 }

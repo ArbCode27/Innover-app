@@ -1,149 +1,102 @@
-import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
-import { Textarea } from "@/components/ui/textarea";
 import { ScreenState } from "@/components/screen-state";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { AudioMessagePlayer } from "@/features/chat/audio-message-player";
+import { useAuthSession } from "@/features/auth/auth-session";
 import {
   fetchConversationSnapshot,
   retryFailedDraft,
   sendClientDraft,
 } from "@/features/chat/app-chat-gateway";
-import { pickChatImage } from "@/features/chat/image-picker";
+import {
+  CHAT_QUERY_KEY,
+  dropOptimistic,
+  upsertMessages,
+} from "@/features/chat/chat-cache";
+import { useChannelLiveStore } from "@/features/chat/channel-live-store";
+import { useChatFocusStore } from "@/features/chat/chat-focus-store";
+import { ChatComposer } from "@/features/chat/chat-composer";
 import { useComposerStore } from "@/features/chat/composer-store";
+import { pickChatDocument } from "@/features/chat/document-picker";
+import {
+  pickChatImage,
+  pickChatVideo,
+  takeChatPhoto,
+} from "@/features/chat/image-picker";
+import {
+  buildChatLocationDraft,
+  buildOutageLocationDraft,
+} from "@/features/chat/location-sender";
+import {
+  formatDayLabel,
+  MessageBubble,
+} from "@/features/chat/message-bubble";
+import { useKeyboardHeight } from "@/features/chat/use-keyboard-height";
 import { useVoiceRecorder } from "@/features/chat/use-voice-recorder";
-import { cn } from "@/lib/utils";
+import { noticeFromUnknown } from "@/lib/user-notice";
 import type { ChatSnapshot } from "@/types/app-channel";
-import type { AppMessage } from "@/types/domain";
+import type { AppMessage, MessageMediaType, OutboundClientDraft } from "@/types/domain";
+import { useIsFocused, useRoute } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Image as ImageIcon, Mic, Square } from "lucide-react-native";
+import { UserRound } from "lucide-react-native";
 import * as React from "react";
 import {
   FlatList,
-  Image,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-const CHAT_QUERY_KEY = ["chat-snapshot"] as const;
+const POLL_WHEN_OFFLINE_MS = 10_000;
 
-const formatMessageTime = (isoString?: string) => {
-  if (!isoString) return "";
-  try {
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return "";
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return "";
+const sameSenderGroup = (left: AppMessage, right: AppMessage) =>
+  left.type === right.type && left.senderType === right.senderType;
+
+const sameDay = (left: string, right: string) =>
+  left.slice(0, 10) === right.slice(0, 10);
+
+const readChatIntent = (params: object | undefined) => {
+  if (!params || !("intent" in params)) {
+    return undefined;
   }
-};
-
-const MessageBubble = ({ message }: { message: AppMessage }) => {
-  const isOutbound = message.type === "out";
-  const author =
-    message.senderType === "bot"
-      ? (message.sentBy || "Nova (IA)")
-      : message.senderType === "agent"
-        ? (message.sentBy || "Asesor Humano")
-        : "Tú";
-  const body = message.caption?.trim() || message.content;
-
-  return (
-    <View
-      className={cn(
-        "max-w-[85%] gap-1",
-        isOutbound ? "self-start" : "self-end",
-      )}
-    >
-      <View className="flex-row items-center gap-2">
-        {isOutbound ? (
-          <Avatar alt={author} className="size-7 border border-primary/30 bg-primary/10">
-            <AvatarFallback>
-              <Text className="text-[11px] font-bold text-primary">
-                {author.slice(0, 1)}
-              </Text>
-            </AvatarFallback>
-          </Avatar>
-        ) : null}
-        <Text variant="small" className="text-xs font-semibold text-muted-foreground">
-          {author}
-        </Text>
-      </View>
-      <View
-        className={cn(
-          "gap-2 rounded-2xl px-4 py-3 shadow-sm",
-          isOutbound ? "bg-card border-border/80 border" : "bg-primary",
-        )}
-      >
-        {message.mediaType === "image" && message.mediaUrl ? (
-          <Image
-            source={{ uri: message.mediaUrl }}
-            className="h-44 w-52 rounded-xl"
-            accessibilityLabel="Imagen enviada"
-            resizeMode="cover"
-          />
-        ) : null}
-        {message.mediaType === "audio" && message.mediaUrl ? (
-          <AudioMessagePlayer uri={message.mediaUrl} inverted={!isOutbound} />
-        ) : null}
-        {message.mediaType === "location" ? (
-          <Text
-            className={
-              isOutbound ? "text-card-foreground" : "text-primary-foreground"
-            }
-          >
-            {message.locationName || "Ubicación enviada"}
-          </Text>
-        ) : body ? (
-          <Text
-            className={
-              isOutbound ? "text-card-foreground" : "text-primary-foreground"
-            }
-          >
-            {body}
-          </Text>
-        ) : null}
-        <View className="flex-row items-center justify-end gap-1.5 pt-0.5">
-          {message.status === "pending" ? (
-            <Text className="text-[10px] text-muted-foreground">Enviando…</Text>
-          ) : null}
-          {message.status === "failed" ? (
-            <Text className="text-[10px] text-destructive">No se envió</Text>
-          ) : null}
-          {message.createdAt ? (
-            <Text
-              className={cn(
-                "text-[10px]",
-                isOutbound ? "text-muted-foreground" : "text-primary-foreground/75",
-              )}
-            >
-              {formatMessageTime(message.createdAt)}
-            </Text>
-          ) : null}
-        </View>
-      </View>
-    </View>
-  );
+  const intent = params.intent;
+  if (intent === "report-outage" || intent === "confirm-connection") {
+    return intent;
+  }
+  return undefined;
 };
 
 export const ChatScreen = () => {
+  const { session } = useAuthSession();
   const queryClient = useQueryClient();
+  const isFocused = useIsFocused();
+  const isLive = useChannelLiveStore((state) => state.isLive);
+  const route = useRoute();
   const draft = useComposerStore((state) => state.draft);
   const failedDraft = useComposerStore((state) => state.failedDraft);
   const setDraft = useComposerStore((state) => state.setDraft);
   const markFailed = useComposerStore((state) => state.markFailed);
   const clearFailed = useComposerStore((state) => state.clearFailed);
   const recorder = useVoiceRecorder();
+  const listRef = React.useRef<FlatList<AppMessage>>(null);
   const [pickerError, setPickerError] = React.useState<string | null>(null);
+  const outageSentRef = React.useRef(false);
+  const confirmDraftRef = React.useRef(false);
+
+  React.useEffect(() => {
+    useChatFocusStore.getState().setChatFocused(isFocused);
+    return () => {
+      useChatFocusStore.getState().setChatFocused(false);
+    };
+  }, [isFocused]);
 
   const snapshotQuery = useQuery({
     queryKey: CHAT_QUERY_KEY,
-    queryFn: fetchConversationSnapshot,
-    refetchInterval: 3000,
+    queryFn: () => fetchConversationSnapshot(),
+    enabled: Boolean(session),
+    refetchInterval: isLive || !isFocused ? false : POLL_WHEN_OFFLINE_MS,
   });
 
   const sendMutation = useMutation({
@@ -169,6 +122,9 @@ export const ChatScreen = () => {
           mediaUrl: payload.mediaUrl,
           mimeType: payload.mimeType,
           caption: payload.caption,
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+          locationName: payload.locationName,
         };
         return {
           ...snapshot,
@@ -177,14 +133,25 @@ export const ChatScreen = () => {
       });
       return { previous };
     },
-    onSuccess: async () => {
+    onSuccess: (sent) => {
       setDraft("");
       setPickerError(null);
-      await queryClient.invalidateQueries({ queryKey: CHAT_QUERY_KEY });
-      // Invalida brevemente después para mostrar la respuesta automática simulada de Nova
-      setTimeout(() => {
-        void queryClient.invalidateQueries({ queryKey: CHAT_QUERY_KEY });
-      }, 550);
+      queryClient.setQueryData<ChatSnapshot>(CHAT_QUERY_KEY, (current) => {
+        if (!current) {
+          return {
+            conversation: {
+              id: sent.conversationId,
+              status: session?.conversation.status ?? "abierto",
+              humanMode: session?.conversation.humanMode ?? false,
+            },
+            messages: [sent],
+          };
+        }
+        return {
+          ...current,
+          messages: upsertMessages(dropOptimistic(current.messages), [sent]),
+        };
+      });
     },
     onError: (_error, payload, context) => {
       if (context?.previous) {
@@ -196,49 +163,91 @@ export const ChatScreen = () => {
 
   const retryMutation = useMutation({
     mutationFn: retryFailedDraft,
-    onSuccess: async () => {
+    onSuccess: (sent) => {
       clearFailed();
-      await queryClient.invalidateQueries({ queryKey: CHAT_QUERY_KEY });
+      queryClient.setQueryData<ChatSnapshot>(CHAT_QUERY_KEY, (current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          ...current,
+          messages: upsertMessages(dropOptimistic(current.messages), [sent]),
+        };
+      });
     },
   });
 
-  const handleSendText = () => {
-    const content = draft.trim();
-    if (!content || sendMutation.isPending) {
+  const sendDraft = (payload: OutboundClientDraft) => {
+    if (sendMutation.isPending) {
       return;
     }
-    sendMutation.mutate({ content });
+    sendMutation.mutate(payload);
   };
 
-  const handleSendImage = async () => {
+  const handleSendText = () => {
+    const content = draft.trim();
+    if (!content) {
+      return;
+    }
+    sendDraft({ content });
+  };
+
+  const handlePickedMedia = async (
+    mediaType: Exclude<MessageMediaType, "location">,
+    fallbackCaption: string,
+    pick: () => Promise<{
+      uri: string;
+      mimeType: string;
+      fileName: string;
+    } | null>,
+  ) => {
     setPickerError(null);
     try {
-      const picked = await pickChatImage();
+      const picked = await pick();
       if (!picked) {
         return;
       }
-      sendMutation.mutate({
-        content: draft.trim() || "Imagen",
-        mediaType: "image",
+      const caption = draft.trim() || undefined;
+      sendDraft({
+        content: caption ?? fallbackCaption,
+        mediaType,
         mediaUrl: picked.uri,
         mimeType: picked.mimeType,
         fileName: picked.fileName,
-        caption: draft.trim() || undefined,
+        caption,
       });
     } catch (error) {
       setPickerError(
-        error instanceof Error ? error.message : "No se pudo adjuntar la imagen.",
+        error instanceof Error
+          ? error.message
+          : "No se pudo adjuntar el archivo.",
       );
     }
   };
 
-  const handleSendVoice = async () => {
+  const handleShareLocation = async (outage: boolean) => {
+    setPickerError(null);
+    try {
+      const payload = outage
+        ? await buildOutageLocationDraft()
+        : await buildChatLocationDraft();
+      sendDraft(payload);
+    } catch (error) {
+      setPickerError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo compartir la ubicación.",
+      );
+    }
+  };
+
+  const handleToggleVoice = async () => {
     if (recorder.isRecording) {
       const recorded = await recorder.handleStop();
       if (!recorded) {
         return;
       }
-      sendMutation.mutate({
+      sendDraft({
         content: "Nota de voz",
         mediaType: "audio",
         mediaUrl: recorded.uri,
@@ -250,20 +259,70 @@ export const ChatScreen = () => {
     await recorder.handleStart();
   };
 
+  const intent = readChatIntent(
+    route.params && typeof route.params === "object" ? route.params : undefined,
+  );
+
+  React.useEffect(() => {
+    if (intent === "confirm-connection" && !confirmDraftRef.current) {
+      confirmDraftRef.current = true;
+      setDraft("Ya tengo internet estable.");
+      return;
+    }
+    if (intent !== "report-outage" || outageSentRef.current) {
+      return;
+    }
+    outageSentRef.current = true;
+    const sendOutage = async () => {
+      try {
+        const payload = await buildOutageLocationDraft();
+        sendMutation.mutate(payload);
+      } catch (error) {
+        setPickerError(
+          error instanceof Error
+            ? error.message
+            : "No se pudo compartir la ubicación.",
+        );
+      }
+    };
+    void sendOutage();
+  }, [intent, sendMutation, setDraft]);
+
   const list = snapshotQuery.data?.messages ?? [];
   const humanMode = snapshotQuery.data?.conversation.humanMode ?? false;
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
+  const headerOffset = insets.top + 56;
+
+  React.useEffect(() => {
+    if (keyboardHeight <= 0) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [keyboardHeight]);
 
   return (
     <KeyboardAvoidingView
-      className="flex-1 bg-background"
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={88}
+      className="flex-1 bg-muted/40"
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={headerOffset}
+      style={
+        Platform.OS === "android" ? { paddingBottom: keyboardHeight } : undefined
+      }
     >
       {humanMode ? (
         <View className="px-4 pt-3">
-          <Badge accessibilityLabel="Atendido por asesor">
-            <Text>Atendido por asesor</Text>
-          </Badge>
+          <Alert icon={UserRound}>
+            <AlertTitle>Atendido por asesor</AlertTitle>
+            <AlertDescription>
+              Un asesor humano está en esta conversación.
+            </AlertDescription>
+          </Alert>
         </View>
       ) : null}
 
@@ -272,18 +331,58 @@ export const ChatScreen = () => {
         isEmpty={!snapshotQuery.isPending && list.length === 0}
         emptyTitle="Sin mensajes"
         emptyDescription="Escribe para empezar la conversación."
-        errorMessage={
-          snapshotQuery.isError ? "No se pudieron cargar los mensajes." : null
+        errorNotice={
+          snapshotQuery.isError
+            ? noticeFromUnknown(
+                snapshotQuery.error,
+                "No se pudo abrir el chat",
+              )
+            : null
         }
         onRetry={() => {
           void snapshotQuery.refetch();
         }}
       >
         <FlatList
+          ref={listRef}
           data={list}
           keyExtractor={(item) => String(item.id)}
-          contentContainerClassName="gap-4 p-4"
-          renderItem={({ item }) => <MessageBubble message={item} />}
+          className="flex-1"
+          contentContainerClassName="gap-1 px-3 py-3"
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() => {
+            listRef.current?.scrollToEnd({ animated: true });
+          }}
+          renderItem={({ item, index }) => {
+            const previous = index > 0 ? list[index - 1] : undefined;
+            const next = list[index + 1];
+            const showDay =
+              !previous || !sameDay(previous.createdAt, item.createdAt);
+            const showAuthor =
+              item.type === "out" &&
+              (!previous || !sameSenderGroup(previous, item) || showDay);
+            const isLastInGroup =
+              !next || !sameSenderGroup(item, next) || !sameDay(item.createdAt, next.createdAt);
+
+            return (
+              <View className="gap-2">
+                {showDay ? (
+                  <View className="items-center py-2">
+                    <View className="rounded-full bg-card px-3 py-1 shadow-sm">
+                      <Text className="text-[11px] font-medium text-muted-foreground">
+                        {formatDayLabel(item.createdAt)}
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+                <MessageBubble
+                  message={item}
+                  showAuthor={showAuthor}
+                  isLastInGroup={isLastInGroup}
+                />
+              </View>
+            );
+          }}
           refreshControl={
             <RefreshControl
               refreshing={snapshotQuery.isRefetching && !snapshotQuery.isPending}
@@ -296,10 +395,18 @@ export const ChatScreen = () => {
       </ScreenState>
 
       {failedDraft ? (
-        <View className="border-border bg-card gap-2 border-t px-4 py-3">
-          <Text variant="muted">No se pudo enviar el último mensaje.</Text>
+        <View className="flex-row items-center justify-between gap-3 border-t border-border bg-card px-4 py-2">
+          <Text className="flex-1 text-sm text-muted-foreground">
+            {sendMutation.error
+              ? noticeFromUnknown(
+                  sendMutation.error,
+                  "No se envió el mensaje",
+                ).description
+              : "No se envió el mensaje. Toca Reenviar cuando tengas señal."}
+          </Text>
           <Button
             variant="outline"
+            size="sm"
             onPress={() => {
               retryMutation.mutate(failedDraft);
             }}
@@ -311,54 +418,39 @@ export const ChatScreen = () => {
       ) : null}
 
       {recorder.errorMessage || pickerError ? (
-        <View className="px-4 pt-2">
-          <Text className="text-destructive">
+        <View className="px-4 pb-1">
+          <Text className="text-destructive text-sm">
             {recorder.errorMessage ?? pickerError}
           </Text>
         </View>
       ) : null}
 
-      <View className="border-border bg-background gap-2 border-t p-4">
-        <Textarea
-          accessibilityLabel="Escribe un mensaje"
-          placeholder="Escribe un mensaje"
-          value={draft}
-          onChangeText={setDraft}
-          numberOfLines={3}
-        />
-        <View className="flex-row gap-2">
-          <Button
-            variant="outline"
-            onPress={() => {
-              void handleSendImage();
-            }}
-            accessibilityLabel="Adjuntar imagen"
-          >
-            <Icon as={ImageIcon} className="size-4" />
-            <Text>Imagen</Text>
-          </Button>
-          <Button
-            variant="outline"
-            onPress={() => {
-              void handleSendVoice();
-            }}
-            accessibilityLabel={
-              recorder.isRecording ? "Detener grabación" : "Grabar audio"
-            }
-          >
-            <Icon as={recorder.isRecording ? Square : Mic} className="size-4" />
-            <Text>{recorder.isRecording ? "Detener" : "Audio"}</Text>
-          </Button>
-          <Button
-            className="flex-1"
-            onPress={handleSendText}
-            disabled={sendMutation.isPending || draft.trim().length === 0}
-            accessibilityLabel="Enviar"
-          >
-            <Text>{sendMutation.isPending ? "Enviando…" : "Enviar"}</Text>
-          </Button>
-        </View>
-      </View>
+      <ChatComposer
+        draft={draft}
+        onDraftChange={setDraft}
+        isSending={sendMutation.isPending}
+        isRecording={recorder.isRecording}
+        recordingSeconds={recorder.elapsedSeconds}
+        onSendText={handleSendText}
+        onPickImage={() => {
+          void handlePickedMedia("image", "Imagen", pickChatImage);
+        }}
+        onTakePhoto={() => {
+          void handlePickedMedia("image", "Imagen", takeChatPhoto);
+        }}
+        onPickVideo={() => {
+          void handlePickedMedia("video", "Video", pickChatVideo);
+        }}
+        onPickDocument={() => {
+          void handlePickedMedia("document", "Archivo", pickChatDocument);
+        }}
+        onShareLocation={() => {
+          void handleShareLocation(false);
+        }}
+        onToggleVoice={() => {
+          void handleToggleVoice();
+        }}
+      />
     </KeyboardAvoidingView>
   );
 };

@@ -28,7 +28,7 @@ const replyForInbound = (message: AppMessage) => {
     text.includes("zelle") ||
     text.includes("bcv")
   ) {
-    return "Puedes adjuntar tu comprobante por aquí usando el botón de imagen o desde la pestaña Facturación. Tu saldo actual es $30,00 (Bs. 26.141,07 según tasa BCV).";
+    return "Puedes adjuntar tu comprobante por aquí usando el botón de imagen o desde Inicio. Tu saldo actual es $30,00 (Bs. 26.141,07 según tasa BCV).";
   }
   if (
     text.includes("falla") ||

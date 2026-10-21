@@ -48,7 +48,9 @@ export const CustomerContractScreen = () => {
           <Card>
             <CardHeader>
               <CardTitle>Contrato</CardTitle>
-              <CardDescription>Solo lectura</CardDescription>
+              <CardDescription>
+                Contrato de Conexiones Innover · solo lectura
+              </CardDescription>
             </CardHeader>
             <CardContent className="gap-3">
               <AccountStatusBadge status={contractQuery.data.accountStatus} />

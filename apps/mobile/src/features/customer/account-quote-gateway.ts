@@ -20,6 +20,8 @@ export const fetchAccountQuote = async (): Promise<AccountQuote> => {
     nextOpenLabel: null,
     planName: "Fibra 200 Mbps",
     zone: "Valencia · Urb. El Parral",
+    periodLabel: "Octubre 2026",
+    dueHint: "Paga antes de la fecha de corte y evita cargos",
   };
 };
 
