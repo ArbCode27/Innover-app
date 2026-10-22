@@ -50,11 +50,10 @@ import {
 } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowRight,
-  Check,
   CheckCircle2,
   ChevronRight,
   CreditCard,
@@ -72,6 +71,7 @@ import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 
 export const CustomerHomeScreen = () => {
   const { profile } = useAuthSession();
+  const queryClient = useQueryClient();
   const navigation =
     useNavigation<
       CompositeNavigationProp<
@@ -87,10 +87,11 @@ export const CustomerHomeScreen = () => {
   );
   const [isSendingDeviceNotice, setIsSendingDeviceNotice] =
     React.useState(false);
+  const [isPullRefreshing, setIsPullRefreshing] = React.useState(false);
 
   const quoteQuery = useQuery({
     queryKey: ["account-quote"],
-    queryFn: fetchAccountQuote,
+    queryFn: () => fetchAccountQuote(),
   });
 
   const ticketQuery = useQuery({
@@ -104,11 +105,20 @@ export const CustomerHomeScreen = () => {
     queryFn: fetchHomeFaqPreview,
   });
 
-  const isRefreshing = quoteQuery.isRefetching || ticketQuery.isRefetching;
+  const isRefreshing =
+    isPullRefreshing || quoteQuery.isRefetching || ticketQuery.isRefetching;
 
   const handleRefresh = () => {
-    void quoteQuery.refetch();
-    void ticketQuery.refetch();
+    setIsPullRefreshing(true);
+    void Promise.all([
+      queryClient.fetchQuery({
+        queryKey: ["account-quote"],
+        queryFn: () => fetchAccountQuote({ refresh: true }),
+      }),
+      ticketQuery.refetch(),
+    ]).finally(() => {
+      setIsPullRefreshing(false);
+    });
   };
 
   const handleNoticeCta = (action: "chat" | "ticket" | "chat-confirm") => {
@@ -156,18 +166,17 @@ export const CustomerHomeScreen = () => {
             ? chromeForSeverity("success")
             : { ...chromeForSeverity("success"), label: "Activo" };
 
-  // Datos mockeados de identidad de abonado
-  const subscriberName =
-    profile?.displayName &&
-    profile.displayName !== "Abonado" &&
-    profile.displayName !== "Cliente"
-      ? profile.displayName
-      : "Carlos Silva";
+  const subscriberName = profile?.displayName?.trim() || "Abonado";
   const subscriberCedula = profile?.loginCedula
-    ? `V-${profile.loginCedula}`
-    : "V-18.765.432";
-  const contractNumber = "FTTH-2026-0842";
-  const zoneName = quote?.zone ?? "Valencia · Urb. El Parral";
+    ? `V-${profile.loginCedula.replace(/\D/g, "").replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`
+    : null;
+  const contractLabel =
+    quote?.contractStateLabel ||
+    quote?.contractId ||
+    (quote?.wisproLinked === false ? "Sin vínculo Wispro" : null);
+  const zoneName = quote?.zone?.trim() || null;
+  const planName = quote?.planName?.trim() || null;
+  const debtUsdLabel = quote?.debtUsdFormatted ?? "—";
 
   return (
     <ScrollView
@@ -199,13 +208,15 @@ export const CustomerHomeScreen = () => {
             </View>
 
             <View className="flex-row items-center gap-1.5">
-              <Badge
-                variant="outline"
-                className="border-border/70 bg-muted/30 px-2.5 py-1">
-                <Text className="text-[10px] font-bold text-muted-foreground">
-                  {subscriberCedula}
-                </Text>
-              </Badge>
+              {subscriberCedula ? (
+                <Badge
+                  variant="outline"
+                  className="border-border/70 bg-muted/30 px-2.5 py-1">
+                  <Text className="text-[10px] font-bold text-muted-foreground">
+                    {subscriberCedula}
+                  </Text>
+                </Badge>
+              ) : null}
 
               <Pressable
                 onPress={handleRefresh}
@@ -238,29 +249,34 @@ export const CustomerHomeScreen = () => {
             </Text>
 
             <View className="flex-row flex-wrap items-center gap-x-2 gap-y-1 pt-0.5">
-              <View className="flex-row items-center gap-1">
-                <Icon
-                  as={CheckCircle2}
-                  size={12}
-                  className="text-emerald-500"
-                />
-                <Text className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                  Conexión Activa
-                </Text>
-              </View>
-              <Text className="text-xs text-muted-foreground/60">•</Text>
-              <Text className="text-xs text-muted-foreground">
-                Contrato {contractNumber}
-              </Text>
-              <Text className="text-xs text-muted-foreground/60">•</Text>
-              <View className="flex-row items-center gap-1">
-                <Icon as={MapPin} size={11} className="text-muted-foreground" />
-                <Text
-                  className="text-xs text-muted-foreground"
-                  numberOfLines={1}>
-                  {zoneName}
-                </Text>
-              </View>
+              {quote?.accountStatus ? (
+                <AccountStatusBadge status={quote.accountStatus} />
+              ) : null}
+              {contractLabel ? (
+                <>
+                  <Text className="text-xs text-muted-foreground/60">•</Text>
+                  <Text className="text-xs text-muted-foreground">
+                    {contractLabel}
+                  </Text>
+                </>
+              ) : null}
+              {zoneName ? (
+                <>
+                  <Text className="text-xs text-muted-foreground/60">•</Text>
+                  <View className="flex-row items-center gap-1">
+                    <Icon
+                      as={MapPin}
+                      size={11}
+                      className="text-muted-foreground"
+                    />
+                    <Text
+                      className="text-xs text-muted-foreground"
+                      numberOfLines={1}>
+                      {zoneName}
+                    </Text>
+                  </View>
+                </>
+              ) : null}
             </View>
           </View>
         </View>
@@ -415,8 +431,11 @@ export const CustomerHomeScreen = () => {
                       Acción requerida para reconexión
                     </Text>
                     <Text className="text-xs leading-relaxed text-muted-foreground">
-                      Saldo pendiente: {quote.debtUsdFormatted} (
-                      {quote.debtBsFormatted ?? "en Bs según BCV"}).
+                      Saldo pendiente: {debtUsdLabel}
+                      {quote.debtBsFormatted
+                        ? ` (${quote.debtBsFormatted})`
+                        : ""}
+                      .
                     </Text>
                     <Button
                       className="mt-1 h-12 min-h-12 w-full flex-row items-center justify-center gap-2 rounded-xl bg-destructive"
@@ -597,12 +616,32 @@ export const CustomerHomeScreen = () => {
               </CardHeader>
 
               <CardContent className="gap-3">
+                {!quote.wisproLinked ? (
+                  <Alert icon={Info}>
+                    <AlertTitle>Cuenta no vinculada</AlertTitle>
+                    <AlertDescription>
+                      Tu perfil aún no está vinculado al servicio. Contacta a
+                      soporte por el chat para asociar tu contrato.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {quote.billingStale ? (
+                  <Alert icon={Info}>
+                    <AlertTitle>Saldo en revisión</AlertTitle>
+                    <AlertDescription>
+                      No pudimos actualizar la deuda con el servicio ahora.
+                      Mostramos el último saldo conocido.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+
                 <View className="rounded-2xl border border-border/70 bg-muted/30 p-4">
                   <Text className="text-xs font-semibold text-muted-foreground uppercase">
                     Saldo pendiente total:
                   </Text>
                   <Text className="mt-1 text-3xl font-black tracking-tight text-foreground">
-                    {quote.debtUsdFormatted}
+                    {debtUsdLabel}
                   </Text>
                   {quote.debtBsFormatted ? (
                     <Text className="text-sm font-bold text-muted-foreground">
@@ -692,9 +731,7 @@ export const CustomerHomeScreen = () => {
               </CardContent>
             </Card>
 
-            {/* 5. PLAN CONTRATADO (Inspirado en la Tarjeta de Planes de Conexiones Innover) */}
             <Card className="overflow-hidden border-border/80 bg-card/95 shadow-xl shadow-black/15">
-              {/* Franja de destaque cósmico */}
               <View className="h-1 w-full bg-primary" />
 
               <CardHeader className="gap-2">
@@ -704,104 +741,52 @@ export const CustomerHomeScreen = () => {
                       PLAN CONTRATADO
                     </Text>
                   </View>
-                  <Text className="text-[10px] font-bold text-muted-foreground uppercase">
-                    FTTH Residencial
-                  </Text>
+                  {quote.contractStateLabel ? (
+                    <Text className="text-[10px] font-bold text-muted-foreground uppercase">
+                      {quote.contractStateLabel}
+                    </Text>
+                  ) : null}
                 </View>
 
                 <CardTitle className="text-xl font-black tracking-tight text-foreground">
-                  Plan Hogar Pro · 200 Mbps
+                  {planName ?? "Sin plan asignado"}
                 </CardTitle>
                 <CardDescription className="text-xs text-muted-foreground">
-                  Conexión ultra rápida y simétrica con tecnología FTTH directa
-                  para tu inmueble.
+                  {quote.wisproLinked
+                    ? "Datos del plan asociados a tu cuenta en el servicio."
+                    : "Cuando tu cuenta esté vinculada, verás aquí el plan activo."}
                 </CardDescription>
               </CardHeader>
 
               <CardContent className="gap-4">
-                {/* Bloque de velocidad con badge de alta legibilidad */}
-                <View className="rounded-2xl border border-border/80 bg-muted/20 p-4">
-                  <View className="flex-row items-center justify-between gap-2">
-                    <View className="flex-row items-baseline gap-1.5">
-                      <Text className="text-3xl font-black tracking-tighter text-foreground">
-                        200
-                      </Text>
-                      <Text className="text-lg font-black text-primary">
-                        Mbps
-                      </Text>
-                    </View>
-
-                    <View className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 dark:border-cyan-500/40 dark:bg-cyan-950/40">
-                      <Text className="text-[10px] font-extrabold text-primary dark:text-cyan-300">
-                        Velocidad Simétrica 1:1
-                      </Text>
-                    </View>
-                  </View>
-                  <Text className="mt-1 text-[11px] text-muted-foreground">
-                    Misma velocidad para descarga y subida de archivos de gran
-                    tamaño.
-                  </Text>
-
-                  {/* Equipamiento y nodo con layout seguro: sin superposición de textos */}
-                  <View className="mt-3 gap-2 border-t border-border/50 pt-3">
+                <View className="rounded-2xl border border-border/80 bg-muted/20 p-4 gap-2">
+                  {zoneName ? (
                     <View className="flex-row items-start justify-between gap-3">
                       <Text className="shrink-0 text-[11px] font-semibold text-muted-foreground">
-                        Equipamiento:
-                      </Text>
-                      <Text className="flex-1 text-right text-[11px] font-bold text-foreground">
-                        Router Wi-Fi 6 Gigabit de Alta Cobertura
-                      </Text>
-                    </View>
-
-                    <View className="flex-row items-start justify-between gap-3">
-                      <Text className="shrink-0 text-[11px] font-semibold text-muted-foreground">
-                        Sector / Nodo:
+                        Zona:
                       </Text>
                       <Text className="flex-1 text-right text-[11px] font-bold text-foreground">
                         {zoneName}
                       </Text>
                     </View>
-
+                  ) : null}
+                  {quote.contractId ? (
                     <View className="flex-row items-start justify-between gap-3">
                       <Text className="shrink-0 text-[11px] font-semibold text-muted-foreground">
-                        Dirección IP Asignada:
+                        Contrato:
                       </Text>
                       <Text className="flex-1 text-right text-[11px] font-bold text-foreground">
-                        190.202.88.45 (DHCP ONT)
+                        {quote.contractId}
                       </Text>
                     </View>
-                  </View>
+                  ) : null}
+                  {!zoneName && !quote.contractId ? (
+                    <Text className="text-xs text-muted-foreground">
+                      No hay más detalles de plan disponibles por ahora.
+                    </Text>
+                  ) : null}
                 </View>
 
-                {/* Lista de beneficios incluidos con checks de alto contraste */}
-                <View className="gap-2">
-                  <Text className="text-xs font-extrabold tracking-wider text-muted-foreground uppercase">
-                    Incluido en tu servicio:
-                  </Text>
-                  {[
-                    "Velocidad simétrica real sin límites de descarga ni consumo",
-                    "Latencia ultra baja (<14ms) para streaming 4K y gaming competitivo",
-                    "Streaming simultáneo en múltiples pantallas en 4K UHD sin pausas",
-                    "Router Wi-Fi 6 de última generación con doble banda Gigabit",
-                    "Instalación certificada con fibra drop de alta resistencia climática",
-                    "Soporte técnico directo y monitoreo continuo 24/7",
-                  ].map((benefit, index) => (
-                    <View key={index} className="flex-row items-start gap-2.5">
-                      <View className="mt-0.5 size-4 items-center justify-center rounded-full bg-emerald-500/20">
-                        <Icon
-                          as={Check}
-                          size={11}
-                          className="text-emerald-600 dark:text-emerald-400"
-                        />
-                      </View>
-                      <Text className="flex-1 text-xs leading-relaxed text-foreground">
-                        {benefit}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-
-                {/* Botón para ver contrato */}
                 <Button
                   variant="outline"
                   className="min-h-11 h-11 w-full flex-row items-center justify-center gap-2 rounded-xl border-border/80 active:opacity-90"

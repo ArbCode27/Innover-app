@@ -36,7 +36,7 @@ let messages: AppMessage[] = [
     conversationId: APP_CONVERSATION_ID,
     type: "out",
     content:
-      "¡Con mucho gusto! 🚀 Tu servicio de Fibra Óptica 200 Mbps en Valencia se encuentra 100% activo con una latencia de 14 ms sin pérdidas de paquetes.\n\nTu saldo pendiente actual es de $30,00 (Bs. 26.141,07 a tasa oficial BCV de 871,37 Bs/$). Puedes realizar tu pago por Pago Móvil o Zelle y adjuntar el capture directamente por aquí o desde Inicio.",
+      "¡Con mucho gusto! Puedes ver el estado de tu conexión, plan y saldo real en Inicio y Facturación. Si quieres reportar un pago, adjunta el comprobante por aquí.",
     senderType: "bot",
     sentBy: "Nova",
     status: "sent",

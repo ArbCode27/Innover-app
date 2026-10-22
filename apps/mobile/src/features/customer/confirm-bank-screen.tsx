@@ -68,7 +68,8 @@ export const ConfirmBankScreen = () => {
                       Banco
                     </Text>
                     <Text className="text-base font-semibold text-foreground">
-                      {instructions.bankName}
+                      {instructions.bankName.trim() ||
+                        "Solicítalo por el chat"}
                     </Text>
                   </View>
                 </View>

@@ -7,15 +7,10 @@ import type {
 } from "@/types/domain";
 
 /**
- * Datos bancarios de destino para que el abonado pague.
- * "esto no existe en el CRM; hay que crearlo" (ver docs/BACKEND_GAPS.md).
- * Los montos salen de la cotización del servidor; no se recalculan aquí.
+ * Métodos de pago (UX). Los datos bancarios de destino aún no tienen
+ * endpoint `/api/app/payment-instructions` — ver docs/BACKEND_GAPS.md §5b.
+ * Los montos salen de la cotización real del servidor; no se inventan cuentas.
  */
-const MOCK_BANK_NAME = "Banco Nacional de Crédito";
-const MOCK_RIF = "J-503164379";
-const MOCK_PHONE = "0412-530-1637";
-const MOCK_UPDATED_AT = "17 de octubre a las 18:08";
-
 export const PAYMENT_METHOD_OPTIONS: PaymentMethodOption[] = [
   {
     id: "pago_movil",
@@ -40,33 +35,36 @@ export const PAYMENT_METHOD_OPTIONS: PaymentMethodOption[] = [
 ];
 
 export const hasPendingDebt = (quote: AccountQuote) =>
-  quote.accountStatus === "Con deuda" || quote.accountStatus === "Suspendido";
+  quote.hasDebt ||
+  quote.accountStatus === "Con deuda" ||
+  quote.accountStatus === "Suspendido";
 
 export const paymentStatusLabel = (quote: AccountQuote) => {
   if (quote.accountStatus === "Suspendido") {
     return "Vencida";
   }
-  if (quote.accountStatus === "Con deuda") {
+  if (quote.accountStatus === "Con deuda" || quote.hasDebt) {
     return "Por pagar";
   }
   return "Al día";
 };
 
 const amountLineFor = (quote: AccountQuote, methodId: PaymentMethodId) => {
+  const usd = quote.debtUsdFormatted ?? "$0,00";
   if (methodId === "deposito_usd") {
-    return quote.debtUsdFormatted;
+    return usd;
   }
   if (quote.debtBsFormatted) {
-    return `${quote.debtBsFormatted} / ${quote.debtUsdFormatted}`;
+    return `${quote.debtBsFormatted} / ${usd}`;
   }
-  return quote.debtUsdFormatted;
+  return usd;
 };
 
 const confirmAmountFor = (quote: AccountQuote, methodId: PaymentMethodId) => {
   if (methodId === "deposito_usd") {
-    return quote.debtUsdFormatted;
+    return quote.debtUsdFormatted ?? "$0,00";
   }
-  return quote.debtBsFormatted ?? quote.debtUsdFormatted;
+  return quote.debtBsFormatted ?? quote.debtUsdFormatted ?? "$0,00";
 };
 
 export const fetchPaymentInstructions = async (
@@ -75,30 +73,22 @@ export const fetchPaymentInstructions = async (
   const quote = await fetchAccountQuote();
   const option = PAYMENT_METHOD_OPTIONS.find((item) => item.id === methodId);
 
-  const sharedFields = [
-    { label: "Destino", value: MOCK_BANK_NAME },
-    { label: "RIF", value: MOCK_RIF },
-  ];
-
-  const fields =
-    methodId === "pago_movil"
-      ? [
-          ...sharedFields,
-          { label: "Teléfono", value: MOCK_PHONE },
-          { label: "Monto", value: amountLineFor(quote, methodId) },
-        ]
-      : [
-          ...sharedFields,
-          { label: "Monto", value: amountLineFor(quote, methodId) },
-        ];
-
   return {
     methodId,
     methodTitle: option?.title ?? "Pago Móvil",
-    bankName: MOCK_BANK_NAME,
+    bankName: "",
     confirmAmountLabel: confirmAmountFor(quote, methodId),
     amountLine: amountLineFor(quote, methodId),
-    fields,
-    updatedAtLabel: MOCK_UPDATED_AT,
+    fields: [
+      {
+        label: "Monto",
+        value: amountLineFor(quote, methodId),
+      },
+      {
+        label: "Datos bancarios",
+        value: "Solicítalos por el chat de la app",
+      },
+    ],
+    updatedAtLabel: "Pendiente de configuración en el servidor",
   };
 };

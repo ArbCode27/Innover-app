@@ -41,7 +41,7 @@ export const PaymentMethodScreen = () => {
 
   const quoteQuery = useQuery({
     queryKey: ["account-quote"],
-    queryFn: fetchAccountQuote,
+    queryFn: () => fetchAccountQuote(),
   });
 
   const handleSelect = (methodId: PaymentMethodId) => {
@@ -98,7 +98,7 @@ export const PaymentMethodScreen = () => {
             </View>
             <View className="items-end gap-0.5">
               <Text className="text-base font-black text-foreground">
-                {quote.debtUsdFormatted}
+                {quote.debtUsdFormatted ?? "—"}
               </Text>
               {quote.debtBsFormatted ? (
                 <Text className="text-xs font-semibold text-muted-foreground">

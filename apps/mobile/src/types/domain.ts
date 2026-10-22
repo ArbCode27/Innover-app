@@ -48,7 +48,8 @@ export type AppProfile = {
 export type AccountQuote = {
   accountStatus: ClientAccountStatus;
   serviceSuspended: boolean;
-  debtUsdFormatted: string;
+  hasDebt: boolean;
+  debtUsdFormatted: string | null;
   debtBsFormatted: string | null;
   bcvRateDisplay: string | null;
   officeClosed: boolean;
@@ -57,6 +58,34 @@ export type AccountQuote = {
   zone: string | null;
   periodLabel: string | null;
   dueHint: string | null;
+  wisproLinked: boolean;
+  billingStale: boolean;
+  contractState: string | null;
+  contractStateLabel: string | null;
+  contractId: string | null;
+  pendingInvoices: AppPendingInvoice[];
+};
+
+export type AppPendingInvoice = {
+  id: string;
+  invoiceNumber: string | null;
+  state: string | null;
+  balanceUsdFormatted: string;
+  amountUsdFormatted: string;
+  firstDueDate: string | null;
+  periodTo: string | null;
+  concept: string | null;
+};
+
+export type AppPaymentRecord = {
+  id: string;
+  status: PaymentStatus | string;
+  amountFormatted: string | null;
+  bank: string | null;
+  paymentDate: string | null;
+  transactionCode: string | null;
+  createdAt: string | null;
+  receiptMediaUrl: string | null;
 };
 
 export type PaymentMethodId =
@@ -89,10 +118,15 @@ export type PaymentInstructions = {
 export type ContractSnapshot = {
   holderName: string | null;
   cedula: string | null;
+  cedulaDisplay: string | null;
   planName: string | null;
   zone: string | null;
   contractState: string | null;
+  contractStateLabel: string | null;
+  contractId: string | null;
   accountStatus: ClientAccountStatus;
+  wisproLinked: boolean;
+  pppoeUsername: string | null;
   ipAddress: string | null;
 };
 

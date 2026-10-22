@@ -14,6 +14,7 @@ import { Text } from "@/components/ui/text";
 import { InnoverLogo } from "@/components/brand-logo";
 import { SessionSideMenu } from "@/components/session-side-menu";
 import { useAuthSession } from "@/features/auth/auth-session";
+import { fetchAccountQuote } from "@/features/customer/account-quote-gateway";
 import {
   chromeForSeverity,
   highestSeverity,
@@ -22,6 +23,7 @@ import { ServiceNoticeRow } from "@/features/customer/service-notice-row";
 import { useServiceNoticeStore } from "@/features/customer/service-notice-store";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useQuery } from "@tanstack/react-query";
 import { Bell } from "lucide-react-native";
 import * as React from "react";
 import { Pressable, View } from "react-native";
@@ -46,16 +48,17 @@ export const AppHeader = ({
     ? chromeForSeverity(topSeverity).badge
     : null;
 
-  const displayName =
-    profile?.displayName &&
-    profile.displayName !== "Abonado" &&
-    profile.displayName !== "Cliente"
-      ? profile.displayName
-      : "Carlos Silva";
+  const quoteQuery = useQuery({
+    queryKey: ["account-quote"],
+    queryFn: () => fetchAccountQuote(),
+    enabled: profile?.role === "customer",
+  });
+
+  const displayName = profile?.displayName?.trim() || "Abonado";
 
   const userCedula = profile?.loginCedula
-    ? `V-${profile.loginCedula}`
-    : "V-18.765.432";
+    ? `V-${profile.loginCedula.replace(/\D/g, "").replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`
+    : "Sin cédula";
 
   const initials =
     displayName
@@ -64,7 +67,15 @@ export const AppHeader = ({
       .filter(Boolean)
       .slice(0, 2)
       .join("")
-      .toUpperCase() || "CS";
+      .toUpperCase() || "AB";
+
+  const contractNumber =
+    quoteQuery.data?.contractId ||
+    quoteQuery.data?.contractStateLabel ||
+    (quoteQuery.data?.wisproLinked === false
+      ? "Sin vínculo"
+      : "Contrato");
+  const zoneName = quoteQuery.data?.zone?.trim() || "Zona no disponible";
 
   const roleLabel =
     profile?.role === "technician"
@@ -207,8 +218,8 @@ export const AppHeader = ({
         initials={initials}
         userCedula={userCedula}
         roleLabel={roleLabel}
-        contractNumber="FTTH-2026-0842"
-        zoneName="Valencia · Urb. El Parral"
+        contractNumber={contractNumber}
+        zoneName={zoneName}
         showCustomerActions={showCustomerActions}
         onOpenBilling={handleOpenBilling}
         onOpenContract={handleOpenContract}

@@ -1,21 +1,25 @@
 # Huecos de backend para la app móvil
 
 Canal de cliente en producción: `https://innover-flow.vercel.app/api/app/*`
-(`session`, `messages`, `tickets`, `devices`). La app **no** usa `/api/crm/*`.
+(`session`, `me`, `billing`, `contracts`, `payments`, `messages`, `tickets`,
+`devices`, `realtime-token`). La app **no** usa `/api/crm/*`.
 `EXPO_PUBLIC_APP_CHANNEL_SECRET` debe coincidir con el de Vercel o el login
 responde 401 «Secret de app inválido».
 
-Fuente inspeccionada además: CRM sibling `C:\Users\Oficce\Documents\innovercorp`
-(`innover-crm`) para saldo, pagos y FAQ. No se fingen 200 de `/api/app/*`.
+Fuente inspeccionada: Innover-Flow (`C:\Users\Oficce\Documents\Innover-Flow`)
+para saldo Wispro, contratos, `crm_payments` y FAQ. No se fingen 200 de
+`/api/app/*`.
 
 ## esto no existe en el CRM; hay que crearlo
 
-### 0. Canal Innover Flow (`/api/app/session`, `/messages`, `/tickets`, `/devices`, `/realtime-token`)
+### 0. Canal Innover Flow (`/api/app/session`, `/me`, `/billing`, `/contracts`, `/payments`, `/messages`, `/tickets`, `/devices`, `/realtime-token`)
 
-- **Estado en producción:** `https://innover-flow.vercel.app/api/app/*`.
-  Login cédula + clave (`x-app-secret`), JWT 30 días, chat texto/media,
-  tickets de campo, registro de dispositivo y JWT de Supabase Realtime
-  (`login.realtime` + `GET /api/app/realtime-token`).
+- **Estado en producción / repo Innover-Flow:** rutas `/api/app/*`.
+  Login cédula + clave (`x-app-secret`), JWT 30 días, perfil/billing/contratos/
+  pagos, chat texto/media, tickets de campo, registro de dispositivo y JWT
+  de Supabase Realtime (`login.realtime` + `GET /api/app/realtime-token`).
+  Desplegar Innover-Flow para que Vercel exponga `me`/`billing`/`contracts`/
+  `payments`.
 - **App:** `src/lib/api-client.ts` pega a esas rutas. Errores `{ error, code }`.
   `SESSION_EXPIRED` / 401 cierran sesión (salvo `WRONG_PASSWORD` e
   `INVALID_SECRET` en login). Sin red: «Sin conexión».
@@ -104,16 +108,25 @@ Fuente inspeccionada además: CRM sibling `C:\Users\Oficce\Documents\innovercorp
 - **Aislamiento legado:** `src/lib/channel-app-ingress.ts` con
   `TODO(channel=app)` (solo el mock de `chat-gateway.ts`, no el canal REST).
 
-### 5. Cotización de saldo ya formateada
+### 5. Cotización de saldo / perfil / contratos / pagos (app)
 
-- **Estado en CRM:** `accountStatus` / `serviceSuspended` y `enrichDebtWithBcv` existen en servidor, pero no hay endpoint para la app.
-- **Mock:** `src/features/customer/account-quote-gateway.ts` (strings VE fijos).
-- **Propuesta mínima:** `GET /api/app/account-quote` con solo strings: `account_status`, `debt_usd_formatted`, `debt_bs_formatted`, `bcv_rate_display`, `office_closed`, `next_open_label`, `period_label`, `due_hint`.
+- **Estado en Innover-Flow:** implementado.
+  - `GET /api/app/me` (+ `?refresh=1`) — perfil enriquecido + resumen billing.
+  - `GET /api/app/billing` (+ `?refresh=1`) — deuda formateada VE, facturas
+    pendientes Wispro, `billing_stale`, horario de oficina.
+  - `GET /api/app/contracts` — contratos Wispro / empty si no hay `wispro_id`.
+  - `GET /api/app/payments` — historial `crm_payments` del `client_id` de sesión.
+  - `POST /api/app/session` — `client` enriquecido (account, plan, zone, debt…).
+- **App:** `account-quote-gateway`, `payments-gateway`, Home / Facturación /
+  Contrato leen esos endpoints. Sin mocks de saldo/plan/factura.
+- **Pendiente:** `POST /api/app/payments` para reportar pago con comprobante
+  (hoy el intake es chat → Nova → `intakeCrmReceipt`; no hay `source: "app"`).
 
 ### 5b. Instrucciones de pago (banco destino, RIF, teléfono, métodos)
 
 - **Estado en CRM:** **esto no existe en el CRM; hay que crearlo**. No hay endpoint JWT ni tabla de datos bancarios de cobro (Pago Móvil, transferencia, depósito, depósito USD) para la app. Nova tampoco inyecta cuenta/teléfono/RIF desde `crm_settings`.
-- **Mock en la app:** `src/features/customer/payment-instructions-gateway.ts`. Los montos se copian de `account-quote` (strings VE). Banco/RIF/teléfono son datos mock de destino.
+- **App:** `payment-instructions-gateway.ts` usa montos reales de `/billing`.
+  No inventa banco/RIF/teléfono: indica solicitar datos por el chat.
 - **Propuesta mínima:** `GET /api/app/payment-instructions` con métodos y campos ya formateados (`bank_name`, `rif`, `phone`, `amount_line`, `updated_at_label`). La app no calcula Bs ni tasa BCV.
 
 ### 6. Bucket de adjuntos y políticas
@@ -145,9 +158,10 @@ Fuente inspeccionada además: CRM sibling `C:\Users\Oficce\Documents\innovercorp
 
 ### 10. Contrato: titular, cédula, IP
 
-- **Estado en CRM:** no hay columna `cedula` en `clients`. Cédula en `envoicing` / Wispro. **IP no está** en `ClientEnvoicingData` ni en `wispro-api` de facturación.
-- **Mock:** titular e IP = `null` (no se muestran inventados; IP se omite). Cédula = la que el usuario escribió al entrar, no un dato de Wispro.
-- **Propuesta mínima:** `GET /api/app/account-quote` / contrato debe devolver `holder_name`, `cedula` y `ip_address` **solo si el backend la expone**.
+- **Estado en Innover-Flow:** `clients.cedula` existe. `GET /api/app/contracts`
+  devuelve titular, cédula, plan/PPP, estado (`enabled|alerted|…` → labels ES)
+  y `pppoe_username`. **IP no está** en el contrato Wispro tipado → `null`.
+- **App:** Contrato / Home no inventan IP ni número FTTH de ejemplo.
 
 ### 11. RLS de técnico en `crm_wispro_casos`
 

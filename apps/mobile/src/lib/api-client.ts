@@ -14,8 +14,12 @@ import {
   NETWORK_NOTICE,
 } from "@/lib/user-notice";
 import type {
+  ApiBillingResponse,
+  ApiContractsResponse,
   ApiConversation,
   ApiErrorBody,
+  ApiMeResponse,
+  ApiPaymentsResponse,
   ApiRealtimePayload,
   AppChannelSession,
   GetMessagesResponse,
@@ -189,9 +193,23 @@ type SessionApiResponse = {
   client: {
     id: number;
     name: string;
-    phone: string;
-    cedula?: string;
+    phone: string | null;
+    cedula?: string | null;
     app_enabled?: boolean;
+    zone?: string | null;
+    wispro_linked?: boolean;
+    wispro_id?: string | null;
+    account?: string | null;
+    plan?: string | null;
+    debt?: number | null;
+    has_debt?: boolean;
+    service_suspended?: boolean;
+    contract_state?: string | null;
+    contract_state_label?: string | null;
+    contract_id?: string | null;
+    plan_name?: string | null;
+    ppp_profile?: string | null;
+    calculated_at?: string | null;
   };
   conversation: ApiConversation;
   realtime?: ApiRealtimePayload | null;
@@ -204,8 +222,22 @@ const toSession = (payload: SessionApiResponse): AppChannelSession => ({
     id: payload.client.id,
     name: payload.client.name,
     phone: payload.client.phone,
-    cedula: payload.client.cedula,
+    cedula: payload.client.cedula ?? undefined,
     appEnabled: payload.client.app_enabled,
+    zone: payload.client.zone ?? null,
+    wisproLinked: Boolean(payload.client.wispro_linked),
+    wisproId: payload.client.wispro_id ?? null,
+    account: payload.client.account as AppChannelSession["client"]["account"],
+    plan: payload.client.plan ?? null,
+    debt: payload.client.debt ?? null,
+    hasDebt: Boolean(payload.client.has_debt),
+    serviceSuspended: Boolean(payload.client.service_suspended),
+    contractState: payload.client.contract_state ?? null,
+    contractStateLabel: payload.client.contract_state_label ?? null,
+    contractId: payload.client.contract_id ?? null,
+    planName: payload.client.plan_name ?? null,
+    pppProfile: payload.client.ppp_profile ?? null,
+    calculatedAt: payload.client.calculated_at ?? null,
   },
   conversation: mapApiConversation(payload.conversation),
   realtime: mapRealtime(payload.realtime),
@@ -347,6 +379,46 @@ export class ApiClient {
       }),
     });
     return handleResponse<RegisterDeviceResponse>(response);
+  };
+
+  getMe = async (options?: { refresh?: boolean }): Promise<ApiMeResponse> => {
+    const headers = await authorizedHeaders();
+    const query = options?.refresh ? "?refresh=1" : "";
+    const response = await request(`${API_BASE_URL}/api/app/me${query}`, {
+      method: "GET",
+      headers,
+    });
+    return handleResponse<ApiMeResponse>(response);
+  };
+
+  getBilling = async (options?: {
+    refresh?: boolean;
+  }): Promise<ApiBillingResponse> => {
+    const headers = await authorizedHeaders();
+    const query = options?.refresh ? "?refresh=1" : "";
+    const response = await request(`${API_BASE_URL}/api/app/billing${query}`, {
+      method: "GET",
+      headers,
+    });
+    return handleResponse<ApiBillingResponse>(response);
+  };
+
+  getContracts = async (): Promise<ApiContractsResponse> => {
+    const headers = await authorizedHeaders();
+    const response = await request(`${API_BASE_URL}/api/app/contracts`, {
+      method: "GET",
+      headers,
+    });
+    return handleResponse<ApiContractsResponse>(response);
+  };
+
+  getPayments = async (): Promise<ApiPaymentsResponse> => {
+    const headers = await authorizedHeaders();
+    const response = await request(`${API_BASE_URL}/api/app/payments`, {
+      method: "GET",
+      headers,
+    });
+    return handleResponse<ApiPaymentsResponse>(response);
   };
 }
 

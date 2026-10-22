@@ -28,7 +28,7 @@ const replyForInbound = (message: AppMessage) => {
     text.includes("zelle") ||
     text.includes("bcv")
   ) {
-    return "Puedes adjuntar tu comprobante por aquí usando el botón de imagen o desde Inicio. Tu saldo actual es $30,00 (Bs. 26.141,07 según tasa BCV).";
+    return "Puedes adjuntar tu comprobante por aquí usando el botón de imagen o desde Inicio. El saldo lo ves en Facturación.";
   }
   if (
     text.includes("falla") ||
@@ -38,7 +38,7 @@ const replyForInbound = (message: AppMessage) => {
     text.includes("caído") ||
     text.includes("rojo")
   ) {
-    return "Lamento el inconveniente con tu servicio de fibra. He levantado un reporte preliminar de telemetría para tu sector en Valencia y notifiqué al NOC de guardia.";
+    return "Lamento el inconveniente con tu servicio de fibra. Puedo ayudarte a reportar la falla para que el equipo técnico la revise.";
   }
   if (
     text.includes("saldo") ||
@@ -46,7 +46,7 @@ const replyForInbound = (message: AppMessage) => {
     text.includes("cuánto debo") ||
     text.includes("monto")
   ) {
-    return "Tu saldo pendiente actual es de $30,00 (Bs. 26.141,07 según la tasa oficial BCV de 871,37 Bs/$). Puedes pagar con Pago Móvil o Zelle.";
+    return "Consulta tu saldo real en la pestaña Facturación. Aquí puedo ayudarte a registrar el comprobante.";
   }
   if (
     text.includes("plan") ||
@@ -54,7 +54,7 @@ const replyForInbound = (message: AppMessage) => {
     text.includes("megas") ||
     text.includes("fibra")
   ) {
-    return "Tu plan contratado es Fibra 200 Mbps simétrica 1:1 con router Wi-Fi 6 Gigabit de alta cobertura en Valencia.";
+    return "Tu plan y estado de contrato están en Inicio y Contrato. ¿Quieres que te ayude con otra consulta?";
   }
   if (
     text.includes("gracias") ||

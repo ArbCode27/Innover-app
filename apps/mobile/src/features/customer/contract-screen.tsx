@@ -10,7 +10,6 @@ import {
 import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
 import { ScreenState } from "@/components/screen-state";
-import { useAuthSession } from "@/features/auth/auth-session";
 import { AccountStatusBadge } from "@/features/customer/account-status-badge";
 import { fetchContractSnapshot } from "@/features/customer/account-quote-gateway";
 import { useQuery } from "@tanstack/react-query";
@@ -51,15 +50,16 @@ const ContractField = ({
 );
 
 export const CustomerContractScreen = () => {
-  const { profile } = useAuthSession();
   const contractQuery = useQuery({
-    queryKey: ["contract-snapshot", profile?.userId],
-    queryFn: () => fetchContractSnapshot(profile),
+    queryKey: ["contract-snapshot"],
+    queryFn: fetchContractSnapshot,
   });
 
   const contract = contractQuery.data;
-  const contractNumber =
-    contract?.contractState?.match(/FTTH-\d{4}-\d+/)?.[0] ?? "FTTH-2026-0842";
+  const contractBadge =
+    contract?.contractId ||
+    contract?.contractStateLabel ||
+    (contract?.wisproLinked === false ? "Sin vínculo" : null);
 
   return (
     <ScrollView
@@ -94,28 +94,29 @@ export const CustomerContractScreen = () => {
               Tu contrato
             </Text>
             <Text className="text-sm text-muted-foreground">
-              Datos del servicio FTTH asociados a tu cuenta. No se pueden editar
+              Datos del servicio asociados a tu cuenta. No se pueden editar
               desde la app.
             </Text>
           </View>
 
           <View className="flex-row flex-wrap items-center gap-2">
-            <Badge
-              variant="outline"
-              className="border-border/70 bg-muted/30 px-2.5 py-1"
-            >
-              <Text className="text-[10px] font-bold text-muted-foreground">
-                {contractNumber}
-              </Text>
-            </Badge>
-            {contract?.contractState ? (
+            {contractBadge ? (
+              <Badge
+                variant="outline"
+                className="border-border/70 bg-muted/30 px-2.5 py-1"
+              >
+                <Text className="text-[10px] font-bold text-muted-foreground">
+                  {contractBadge}
+                </Text>
+              </Badge>
+            ) : null}
+            {contract?.contractStateLabel ? (
               <Badge
                 variant="outline"
                 className="border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1"
               >
                 <Text className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
-                  {contract.contractState.replace(/\s*\([^)]*\)\s*$/, "").trim() ||
-                    contract.contractState}
+                  {contract.contractStateLabel}
                 </Text>
               </Badge>
             ) : null}
@@ -134,6 +135,16 @@ export const CustomerContractScreen = () => {
       >
         {contract ? (
           <View className="gap-4">
+            {!contract.wisproLinked ? (
+              <Alert icon={Info}>
+                <AlertTitle>Cuenta no vinculada</AlertTitle>
+                <AlertDescription>
+                  Aún no hay un contrato de servicio asociado. Contacta a
+                  soporte por el chat para vincular tu cuenta.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
             <Card className="border-border/80 bg-card/95">
               <CardHeader className="gap-1 pb-2">
                 <CardTitle className="text-base font-black">Titular</CardTitle>
@@ -151,11 +162,9 @@ export const CustomerContractScreen = () => {
                   icon={IdCard}
                   label="Cédula"
                   value={
-                    contract.cedula
-                      ? contract.cedula.startsWith("V-")
-                        ? contract.cedula
-                        : `V-${contract.cedula}`
-                      : "No disponible"
+                    contract.cedulaDisplay ||
+                    contract.cedula ||
+                    "No disponible"
                   }
                 />
               </CardContent>
@@ -179,6 +188,13 @@ export const CustomerContractScreen = () => {
                   label="Zona"
                   value={contract.zone ?? "No disponible"}
                 />
+                {contract.pppoeUsername ? (
+                  <ContractField
+                    icon={Network}
+                    label="Usuario PPPoE"
+                    value={contract.pppoeUsername}
+                  />
+                ) : null}
                 {contract.ipAddress ? (
                   <ContractField
                     icon={Network}
