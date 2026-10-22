@@ -24,7 +24,10 @@ import {
 import { loginWithCedulaAndPassword } from "@/features/auth/session-gateway";
 import { cn } from "@/lib/utils";
 import type { UserNotice } from "@/lib/user-notice";
-import { registerPushIfPossible } from "@/features/devices/devices-gateway";
+import {
+  describePushRegisterResult,
+  registerPushIfPossible,
+} from "@/features/devices/devices-gateway";
 import type { AppChannelSession } from "@/types/app-channel";
 import { useNavigation } from "@react-navigation/native";
 import {
@@ -42,6 +45,7 @@ import {
 import * as React from "react";
 import {
   ActivityIndicator,
+  Alert as NativeAlert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -292,10 +296,19 @@ export const LoginScreen = () => {
 
   const finishSignIn = async (session: AppChannelSession) => {
     await signIn(session);
+    // Best-effort: el chat funciona sin push. Nunca tumba el login.
+    // P1: muestra el motivo si el registro falla (también en APK release).
     try {
-      await registerPushIfPossible();
-    } catch {
-      // El chat funciona sin push. No bloqueamos el login.
+      const pushResult = await registerPushIfPossible({ force: true });
+      if (!pushResult.registered) {
+        const copy = describePushRegisterResult(pushResult);
+        NativeAlert.alert(copy.title, copy.body);
+      }
+    } catch (error) {
+      const detail =
+        error instanceof Error ? error.message : "error desconocido";
+      console.warn("[push:register] unexpected", detail);
+      NativeAlert.alert("No se registró el dispositivo", detail);
     }
     setIsSubmitting(false);
   };

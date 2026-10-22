@@ -40,7 +40,9 @@ Cuando EAS termine, abre el enlace, descarga el `.apk` e instálalo (orígenes d
 
 Los botones de simular aviso no salen en este APK (`__DEV__` apagado). La app de cliente (login, chat, facturación) sí.
 
-El splash nativo (Star Conectados) lo define `expo-splash-screen` en `app.json`. Cambiar la imagen exige un APK nuevo.
+El splash nativo (fondo blanco + logo Star Conectados) lo define
+`expo-splash-screen` en `app.json` (`assets/splash.png`). Cambiar la imagen
+exige un APK nuevo.
 
 ## Flujo
 

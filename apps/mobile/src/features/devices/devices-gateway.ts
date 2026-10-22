@@ -1,7 +1,8 @@
 import { apiClient, ApiError } from "@/lib/api-client";
 import {
   devicePlatform,
-  getPushTokenIfAvailable,
+  resolvePushToken,
+  type PushTokenFailureReason,
 } from "@/features/devices/push-token";
 import {
   getOrCreateDeviceId,
@@ -225,24 +226,165 @@ export const seedForeignDevicesForCedula = async (
 
 export const formatDeviceLastSeen = (iso: string) => formatLastSeen(iso);
 
-export const registerPushIfPossible = async () => {
-  const pushToken = await getPushTokenIfAvailable();
-  if (!pushToken) {
-    return { registered: false as const };
+export type RegisterPushReason =
+  | PushTokenFailureReason
+  | "http_error"
+  | "network"
+  | "ok";
+
+export type RegisterPushResult =
+  | { registered: true; reason: "ok"; tokenPreview: string }
+  | { registered: false; reason: RegisterPushReason; detail?: string };
+
+const PUSH_REGISTER_ATTEMPTS = 3;
+const PUSH_REGISTER_BACKOFF_MS = [800, 2000, 4000] as const;
+
+/** Visible también en APK release (Logcat: ReactNativeJS). */
+const logPushRegister = (...args: unknown[]) => {
+  console.warn("[push:register]", ...args);
+};
+
+export const describePushRegisterResult = (
+  result: RegisterPushResult,
+): { title: string; body: string } => {
+  if (result.registered) {
+    return {
+      title: "Avisos listos",
+      body: `Token registrado en el servidor (${result.tokenPreview}).`,
+    };
   }
 
-  try {
-    await apiClient.registerDevice({
-      pushToken,
-      platform: devicePlatform(),
-    });
-    return { registered: true as const };
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 503) {
-      return { registered: false as const };
-    }
-    throw error;
+  switch (result.reason) {
+    case "expo_go":
+      return {
+        title: "Avisos no disponibles",
+        body: "Expo Go no registra push. Usa el APK de EAS.",
+      };
+    case "web":
+      return {
+        title: "Avisos no disponibles",
+        body: "Las notificaciones solo funcionan en Android o iOS.",
+      };
+    case "permission_denied":
+      return {
+        title: "Permiso de avisos denegado",
+        body: "Activa notificaciones para Star Conectados en Ajustes del teléfono y vuelve a entrar.",
+      };
+    case "project_id_missing":
+      return {
+        title: "Push mal configurado",
+        body: "Falta eas.projectId en el build. Hay que regenerar el APK.",
+      };
+    case "token_error":
+      return {
+        title: "No se pudo obtener el token push",
+        body:
+          result.detail?.trim() ||
+          "Revisa FCM en expo.dev (Credentials → Android) y regenera el APK.",
+      };
+    case "http_error":
+      return {
+        title: "No se registró el dispositivo",
+        body:
+          result.detail?.trim() ||
+          "El servidor rechazó POST /api/app/devices.",
+      };
+    case "network":
+      return {
+        title: "Sin conexión al registrar avisos",
+        body: result.detail?.trim() || "Revisa la red e intenta entrar de nuevo.",
+      };
+    default:
+      return {
+        title: "Avisos no registrados",
+        body: result.detail?.trim() || result.reason,
+      };
   }
+};
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const tokenPreview = (token: string) => `${token.slice(0, 28)}…`;
+
+let lastRegisteredToken: string | null = null;
+let lastRegisteredAt = 0;
+const REREGISTER_COOLDOWN_MS = 60_000;
+
+export const registerPushIfPossible = async (options?: {
+  force?: boolean;
+}): Promise<RegisterPushResult> => {
+  const tokenResult = await resolvePushToken();
+  if (!tokenResult.ok) {
+    logPushRegister("skip", tokenResult.reason, tokenResult.detail);
+    return {
+      registered: false,
+      reason: tokenResult.reason,
+      detail: tokenResult.detail,
+    };
+  }
+
+  const pushToken = tokenResult.token;
+  const now = Date.now();
+  if (
+    !options?.force &&
+    lastRegisteredToken === pushToken &&
+    now - lastRegisteredAt < REREGISTER_COOLDOWN_MS
+  ) {
+    logPushRegister("skip", "cooldown", tokenPreview(pushToken));
+    return {
+      registered: true,
+      reason: "ok",
+      tokenPreview: tokenPreview(pushToken),
+    };
+  }
+
+  let lastDetail: string | undefined;
+  for (let attempt = 0; attempt < PUSH_REGISTER_ATTEMPTS; attempt += 1) {
+    try {
+      await apiClient.registerDevice({
+        pushToken,
+        platform: devicePlatform(),
+      });
+      lastRegisteredToken = pushToken;
+      lastRegisteredAt = Date.now();
+      logPushRegister("ok", tokenPreview(pushToken), `attempt=${attempt + 1}`);
+      return {
+        registered: true,
+        reason: "ok",
+        tokenPreview: tokenPreview(pushToken),
+      };
+    } catch (error) {
+      if (error instanceof ApiError) {
+        lastDetail = `status=${error.status} code=${error.code ?? "none"} msg=${error.message}`;
+        logPushRegister("fail", lastDetail, `attempt=${attempt + 1}`);
+        if (error.status === 401) {
+          return {
+            registered: false,
+            reason: "http_error",
+            detail: lastDetail,
+          };
+        }
+      } else {
+        lastDetail =
+          error instanceof Error ? error.message : "unknown register error";
+        logPushRegister("fail", "network", lastDetail, `attempt=${attempt + 1}`);
+      }
+
+      const delay = PUSH_REGISTER_BACKOFF_MS[attempt];
+      if (delay != null && attempt < PUSH_REGISTER_ATTEMPTS - 1) {
+        await sleep(delay);
+      }
+    }
+  }
+
+  return {
+    registered: false,
+    reason: lastDetail?.startsWith("status=") ? "http_error" : "network",
+    detail: lastDetail,
+  };
 };
 
 export const handleInboundPush = (data: {

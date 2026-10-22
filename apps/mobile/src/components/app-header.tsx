@@ -1,14 +1,4 @@
 import type { CustomerStackParamList } from "@/app/navigation-types";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,7 +40,6 @@ export const AppHeader = ({
 
   const [sessionOpen, setSessionOpen] = React.useState(false);
   const [notificationsOpen, setNotificationsOpen] = React.useState(false);
-  const [confirmSignOutOpen, setConfirmSignOutOpen] = React.useState(false);
   const notices = useServiceNoticeStore((state) => state.notices);
   const topSeverity = highestSeverity(notices.map((item) => item.severity));
   const unreadDotClass = topSeverity
@@ -87,8 +76,7 @@ export const AppHeader = ({
   const showCustomerActions =
     profile?.role !== "technician" && profile?.role !== "supervisor";
 
-  const handleConfirmSignOut = () => {
-    setConfirmSignOutOpen(false);
+  const handleSignOut = () => {
     setSessionOpen(false);
     void signOut();
   };
@@ -227,37 +215,8 @@ export const AppHeader = ({
         onOpenHelp={handleOpenHelp}
         onOpenAdvisory={handleOpenAdvisory}
         onOpenDevices={handleOpenDevices}
-        onSignOut={() => {
-          setConfirmSignOutOpen(true);
-        }}
+        onSignOut={handleSignOut}
       />
-
-      <AlertDialog open={confirmSignOutOpen} onOpenChange={setConfirmSignOutOpen}>
-        <AlertDialogContent className="border-border bg-card">
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Confirmar salida?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Se cerrará la sesión de {displayName} en este dispositivo. Podrás
-              volver a entrar con tu cédula de identidad.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              onPress={() => setConfirmSignOutOpen(false)}
-              accessibilityLabel="Cancelar"
-            >
-              <Text>Cancelar</Text>
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive active:bg-destructive/90"
-              onPress={handleConfirmSignOut}
-              accessibilityLabel="Confirmar salida"
-            >
-              <Text className="font-bold text-destructive-foreground">Salir</Text>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </SafeAreaView>
   );
 };

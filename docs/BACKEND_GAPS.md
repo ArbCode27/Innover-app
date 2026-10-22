@@ -27,40 +27,35 @@ Fuente inspeccionada además: CRM sibling `C:\Users\Oficce\Documents\innovercorp
   resubscribe si el canal murió.
 - **Notas internas** (`type=note`) se ocultan. Ubicación se envía como texto
   porque el POST no acepta lat/long.
-- **Push:** tras login se intenta `expo-notifications` y
-  `POST /api/app/devices`. Si no hay token (Expo Go / sin projectId), se omite.
-  La app silencia el banner si Chat está enfocado y, al tocar el aviso, abre
-  Chat. **El envío del push al INSERT `type=out` no existe en Innover Flow;
-  hay que crearlo** (Expo Push al token, `data.kind=chat_message`). Sin eso
-  no hay aviso con la app cerrada.
+- **Push (app):** tras login / sesión / resume pide permiso, obtiene
+  `ExponentPushToken` con `eas.projectId`, canales `star-chat` /
+  `star-ticket`, y `POST /api/app/devices` con reintentos. Expo Go y web
+  no registran. Logs `[push]` / `[push:register]` también en APK release
+  (Logcat). Si el registro falla tras login, Alert con el motivo
+  (`permission_denied`, `token_error`, HTTP, etc.).
+  Tap: `chat_message` → Chat; `field_ticket` → Mi ticket (también cold start).
+- **Push (CRM):** el envío a Expo Push al `type=out` / INSERT de ticket
+  vive en Innover-Flow. Si `app_devices` está vacío, el CRM no tiene a
+  quién empujar: hay que instalar APK EAS (no Expo Go), aceptar permiso
+  y verificar fila en `app_devices`.
 
 ### 0b. Push de mensaje de chat (`type=out` → Expo Push)
 
-- **Estado en Innover Flow:** **esto no existe en el CRM; hay que crearlo**.
-  `POST /api/app/devices` guarda el token. Nadie envía aviso al INSERT
-  de `messages` `type=out` (Nova o asesor).
-- **App:** registra el token en APK/TestFlight, silencia el banner si Chat
-  está enfocado y al tocar abre Chat + catch-up. No programa notificación
-  local desde Realtime (iOS mata el JS con la app cerrada).
-- **Propuesta mínima:** tras persistir `type=out` de canal app, Expo Push
-  al token con `{ title, body, channelId: "star-chat", data: { kind:
-  "chat_message", conversationId, messageId, direction: "out" } }`.
-  Nunca `type=note` ni `type=in`. Collapse por conversación.
+- **Estado en Innover Flow:** el CRM envía Expo Push al persistir
+  `type=out` (canal app). La app registra el token en `app_devices`.
+- **App:** `registerPushIfPossible` + listeners. Silencia banner de chat
+  si Chat está enfocado. Tap abre Chat + catch-up.
+- **Contrato data:** `{ kind: "chat_message", conversationId, messageId,
+  direction: "out" }`, `channelId: "star-chat"`.
 
 ### 0c. Push de ticket de campo (`field_tickets` INSERT → Expo Push)
 
-- **Estado en Innover Flow:** **esto no existe en el CRM; hay que crearlo**.
-  `POST /api/app/devices` guarda el token. Nadie manda Expo Push al INSERT
-  de `field_tickets`. Con la app cerrada, iOS mata el JS y Realtime no
-  alcanza.
-- **App:** si Realtime entrega el INSERT (app abierta, incluso en Chat),
-  muestra aviso local (`kind=field_ticket`, canal `star-ticket`) y al
-  tocar abre Mi ticket. El handler ya acepta el mismo `data.kind` cuando
-  Flow envíe el push. No se silencia si el abonado está escribiendo.
-- **Propuesta mínima:** tras persistir un ticket de campo del cliente de
-  canal app, Expo Push al token con `{ title, body, channelId:
-  "star-ticket", data: { kind: "field_ticket", ticketId, publicId,
-  conversationId } }`. Solo INSERT. Collapse por `ticketId`.
+- **Estado en Innover Flow:** el CRM envía Expo Push al INSERT de ticket
+  de campo. La app también avisa por Realtime si está abierta.
+- **App:** aviso local en INSERT Realtime + handler remoto
+  `kind=field_ticket`, canal `star-ticket`. Tap abre Mi ticket.
+- **Contrato data:** `{ kind: "field_ticket", ticketId, publicId, title?,
+  conversationId }`.
 
 ### 1. Login de abonado (cédula + clave)
 

@@ -6,6 +6,7 @@ import type {
   TechnicianTabParamList,
 } from "@/app/navigation-types";
 import { UiKitPreviewScreen } from "@/app/ui-kit-preview";
+import { AppBootScreen } from "@/components/app-boot-screen";
 import { AppHeader } from "@/components/app-header";
 import { GlassTabBar } from "@/components/glass-tab-bar";
 import { ChatBackHeader } from "@/features/chat/chat-back-header";
@@ -33,7 +34,6 @@ import {
   Ticket,
 } from "lucide-react-native";
 import * as React from "react";
-import { ActivityIndicator, View } from "react-native";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const CustomerStack = createNativeStackNavigator<CustomerStackParamList>();
@@ -249,11 +249,7 @@ export const RootNavigator = () => {
   const { session, profile, isReady } = useAuthSession();
 
   if (!isReady) {
-    return (
-      <View className="flex-1 items-center justify-center bg-background">
-        <ActivityIndicator accessibilityLabel="Cargando sesión" />
-      </View>
-    );
+    return <AppBootScreen />;
   }
 
   return (
