@@ -1,10 +1,11 @@
 import {
-  CASO_SELECT_COLUMNS,
   mapCrmCasoRow,
   type CrmCasoRow,
 } from "@/features/technician/caso-mapper";
-import { hasSupabasePublicEnv } from "@/lib/supabase-env";
-import { getSupabaseBrowserClient } from "@/lib/supabase";
+import { CLOSE_OBSERVATION_MAX_CHARS } from "@/features/technician/close-observation-transcribe";
+import { apiClient } from "@/lib/api-client";
+import { mapApiTicket } from "@/lib/map-api-ticket";
+import type { ApiTicket } from "@/types/app-channel";
 import type { AppCaso, AppProfile } from "@/types/domain";
 
 export const TECHNICIAN_QUEUE_PAGE_SIZE = 8;
@@ -21,6 +22,11 @@ const ownPending = (casos: AppCaso[], employeeId: string) =>
       (caso.status === "open" || caso.status === "scheduled"),
   );
 
+const ownResolved = (casos: AppCaso[], employeeId: string) =>
+  casos.filter(
+    (caso) => caso.employeeId === employeeId && caso.status === "done",
+  );
+
 let mockCasos: AppCaso[] = [
   {
     id: "mock-caso-1",
@@ -29,7 +35,7 @@ let mockCasos: AppCaso[] = [
     title: "Visita técnica",
     cause: "Sin internet",
     status: "scheduled",
-    priority: "high",
+    priority: "urgent",
     clientName: "María López",
     clientPhone: null,
     mapsUrl: "https://maps.google.com/?q=10.1621,-68.0077",
@@ -303,23 +309,41 @@ const requireOwnEmployeeId = (profile: AppProfile | null) => {
   return profile.technicianId;
 };
 
-const fetchRemoteQueue = async (employeeId: string): Promise<AppCaso[]> => {
-  const supabase = getSupabaseBrowserClient();
-  const { data, error } = await supabase
-    .from("crm_wispro_casos")
-    .select(CASO_SELECT_COLUMNS)
-    .eq("employee_id", employeeId)
-    .in("status", ["open", "scheduled"])
-    .order("window_start", { ascending: true, nullsFirst: false });
-
-  if (error) {
-    throw new Error(error.message || "No se pudo cargar tu cola.");
+const mapApiTicketRow = (row: Record<string, unknown>): AppCaso | null => {
+  // Respuesta app-channel (`priority`, `public_id`, `address`…).
+  if (
+    typeof row.id === "string" &&
+    typeof row.title === "string" &&
+    ("priority" in row || "public_id" in row || "address" in row)
+  ) {
+    const mapped = mapApiTicket(row as unknown as ApiTicket);
+    const clientName =
+      (typeof row.client_name === "string" && row.client_name.trim()) ||
+      (typeof row.clientName === "string" && row.clientName.trim()) ||
+      mapped.clientName;
+    const addressText =
+      mapped.addressText?.trim() ||
+      (typeof row.address_text === "string" && row.address_text.trim()) ||
+      null;
+    return {
+      ...mapped,
+      clientName: clientName || null,
+      addressText: addressText || mapped.addressText,
+      employeeId:
+        mapped.employeeId ??
+        (typeof row.employee_id === "string" ? row.employee_id : null),
+    };
   }
 
-  return (data ?? [])
-    .map((row) => mapCrmCasoRow(row as CrmCasoRow))
-    .filter((caso): caso is AppCaso => caso !== null)
-    .filter((caso) => caso.employeeId === employeeId);
+  // Forma CRM legado (`wispro_public_id`, `address_text`…).
+  return mapCrmCasoRow(row as unknown as CrmCasoRow);
+};
+
+const fetchApiTickets = async (includeDone = false): Promise<AppCaso[]> => {
+  const payload = await apiClient.getTechnicianTickets({ includeDone });
+  return (payload.tickets || [])
+    .map((row) => mapApiTicketRow(row))
+    .filter((caso): caso is AppCaso => caso !== null);
 };
 
 export const fetchTechnicianQueue = async (
@@ -327,11 +351,40 @@ export const fetchTechnicianQueue = async (
 ): Promise<AppCaso[]> => {
   const employeeId = requireOwnEmployeeId(profile);
 
-  if (isMockProfile(profile) || !hasSupabasePublicEnv()) {
+  if (isMockProfile(profile)) {
     return ownPending(mockCasos, employeeId).map(cloneCaso);
   }
 
-  return fetchRemoteQueue(employeeId);
+  // Fuente de verdad: GET /api/app/technician/tickets (field_tickets).
+  const tickets = await fetchApiTickets(false);
+  return tickets.filter(
+    (caso) => caso.status === "open" || caso.status === "scheduled",
+  );
+};
+
+export const fetchTechnicianResolved = async (
+  profile: AppProfile | null,
+): Promise<AppCaso[]> => {
+  const employeeId = requireOwnEmployeeId(profile);
+
+  if (isMockProfile(profile)) {
+    return ownResolved(mockCasos, employeeId)
+      .map(cloneCaso)
+      .sort((left, right) => {
+        const leftAt = left.closedAt ?? "";
+        const rightAt = right.closedAt ?? "";
+        return rightAt.localeCompare(leftAt);
+      });
+  }
+
+  const tickets = await fetchApiTickets(true);
+  return tickets
+    .filter((caso) => caso.status === "done")
+    .sort((left, right) => {
+      const leftAt = left.closedAt ?? "";
+      const rightAt = right.closedAt ?? "";
+      return rightAt.localeCompare(leftAt);
+    });
 };
 
 export const fetchTechnicianCaso = async (
@@ -343,7 +396,7 @@ export const fetchTechnicianCaso = async (
   }
   const employeeId = requireOwnEmployeeId(profile);
 
-  if (isMockProfile(profile) || !hasSupabasePublicEnv()) {
+  if (isMockProfile(profile)) {
     const found = mockCasos.find((caso) => caso.id === casoId) ?? null;
     if (!found || found.employeeId !== employeeId) {
       return null;
@@ -351,22 +404,8 @@ export const fetchTechnicianCaso = async (
     return cloneCaso(found);
   }
 
-  const supabase = getSupabaseBrowserClient();
-  const { data, error } = await supabase
-    .from("crm_wispro_casos")
-    .select(CASO_SELECT_COLUMNS)
-    .eq("id", casoId)
-    .eq("employee_id", employeeId)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message || "No se pudo cargar el caso.");
-  }
-  if (!data) {
-    return null;
-  }
-
-  const mapped = mapCrmCasoRow(data as CrmCasoRow);
+  const payload = await apiClient.getTechnicianTicket(casoId);
+  const mapped = mapApiTicketRow(payload.ticket);
   if (!mapped || mapped.employeeId !== employeeId) {
     return null;
   }
@@ -385,10 +424,17 @@ export const closeTechnicianVisit = async (
   const employeeId = requireOwnEmployeeId(profile);
   const observation = input.observation.trim();
   if (observation.length < 3) {
-    throw new Error("La observación es obligatoria para cerrar la visita.");
+    throw new Error(
+      "Escribe al menos 3 caracteres en la observación para cerrar la visita.",
+    );
+  }
+  if (observation.length > CLOSE_OBSERVATION_MAX_CHARS) {
+    throw new Error(
+      `La observación no puede pasar de ${CLOSE_OBSERVATION_MAX_CHARS} caracteres. Acórtala e inténtalo de nuevo.`,
+    );
   }
 
-  if (isMockProfile(profile) || !hasSupabasePublicEnv()) {
+  if (isMockProfile(profile)) {
     const index = mockCasos.findIndex((caso) => caso.id === input.casoId);
     const existing = index >= 0 ? mockCasos[index] : null;
     if (!existing || existing.employeeId !== employeeId) {
@@ -409,30 +455,11 @@ export const closeTechnicianVisit = async (
     return cloneCaso(closed);
   }
 
-  const now = new Date().toISOString();
-  const supabase = getSupabaseBrowserClient();
-  const { data, error } = await supabase
-    .from("crm_wispro_casos")
-    .update({
-      status: "done",
-      closed_at: now,
-      resolution_observation: observation,
-      updated_at: now,
-    })
-    .eq("id", input.casoId)
-    .eq("employee_id", employeeId)
-    .in("status", ["open", "scheduled"])
-    .select(CASO_SELECT_COLUMNS)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message || "No se pudo cerrar la visita.");
-  }
-  if (!data) {
-    throw new Error("Ese ticket no está asignado a ti o ya está cerrado.");
-  }
-
-  const mapped = mapCrmCasoRow(data as CrmCasoRow);
+  const payload = await apiClient.closeTechnicianTicket(
+    input.casoId,
+    observation,
+  );
+  const mapped = mapApiTicketRow(payload.ticket);
   if (!mapped) {
     throw new Error("No se pudo leer el ticket cerrado.");
   }

@@ -1,5 +1,5 @@
 import { TextClassContext } from "@/components/ui/text";
-import { cn } from "@/lib/utils";
+import { cn, withoutTextNodes } from "@/lib/utils";
 import { Slot } from "@rn-primitives/slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
@@ -56,14 +56,22 @@ type BadgeProps = React.ComponentProps<typeof View> & {
   asChild?: boolean;
 } & VariantProps<typeof badgeVariants>;
 
-const Badge = ({ className, variant, asChild, ...props }: BadgeProps) => {
+const Badge = ({
+  className,
+  variant,
+  asChild,
+  children,
+  ...props
+}: BadgeProps) => {
   const Component = asChild ? Slot : View;
   return (
     <TextClassContext.Provider value={badgeTextVariants({ variant })}>
       <Component
         className={cn(badgeVariants({ variant }), className)}
         {...props}
-      />
+      >
+        {withoutTextNodes(children)}
+      </Component>
     </TextClassContext.Provider>
   );
 };

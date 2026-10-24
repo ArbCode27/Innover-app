@@ -28,6 +28,9 @@ type ChatComposerProps = {
   isSending: boolean;
   isRecording: boolean;
   recordingSeconds: number;
+  /** Chat de campo: solo texto (backend sin media en technician/messages). */
+  textOnly?: boolean;
+  placeholder?: string;
   onSendText: () => void;
   onPickImage: () => void;
   onTakePhoto: () => void;
@@ -49,6 +52,8 @@ export const ChatComposer = ({
   isSending,
   isRecording,
   recordingSeconds,
+  textOnly = false,
+  placeholder = "Mensaje",
   onSendText,
   onPickImage,
   onTakePhoto,
@@ -61,6 +66,8 @@ export const ChatComposer = ({
   const [attachOpen, setAttachOpen] = React.useState(false);
   const [keyboardVisible, setKeyboardVisible] = React.useState(false);
   const hasText = draft.trim().length > 0;
+
+  const showAttachPanel = attachOpen && !isRecording && !textOnly;
 
   React.useEffect(() => {
     const showEvent =
@@ -83,6 +90,12 @@ export const ChatComposer = ({
   const bottomPad = keyboardVisible ? 28 : Math.max(insets.bottom, 12);
 
   const handlePrimary = () => {
+    if (textOnly) {
+      if (hasText) {
+        onSendText();
+      }
+      return;
+    }
     if (hasText) {
       onSendText();
       return;
@@ -92,7 +105,13 @@ export const ChatComposer = ({
 
   return (
     <View className="bg-background px-3 pt-2" style={{ paddingBottom: bottomPad }}>
-      {attachOpen && !isRecording ? (
+      {textOnly ? (
+        <Text className="mb-2 px-1 text-[11px] text-muted-foreground">
+          Chat de campo: solo texto por ahora.
+        </Text>
+      ) : null}
+
+      {showAttachPanel ? (
         <View className="mb-3 rounded-3xl border border-border/80 bg-card px-2 py-4 shadow-sm">
           <View className="flex-row flex-wrap justify-evenly gap-y-3">
             <AttachAction
@@ -141,7 +160,7 @@ export const ChatComposer = ({
 
       <View className="flex-row items-end gap-2">
         <View className="min-h-12 flex-1 flex-row items-end rounded-full border border-border bg-card px-1.5 py-1">
-          {isRecording ? (
+          {isRecording && !textOnly ? (
             <View className="h-11 flex-1 flex-row items-center gap-2 px-3">
               <View className="size-2.5 rounded-full bg-destructive" />
               <Text className="text-sm font-medium text-foreground">
@@ -150,61 +169,75 @@ export const ChatComposer = ({
             </View>
           ) : (
             <>
-              <Pressable
-                onPress={() => {
-                  Keyboard.dismiss();
-                  setAttachOpen((open) => !open);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Adjuntar"
-                className="size-11 items-center justify-center"
-              >
-                <Icon
-                  as={Paperclip}
-                  size={20}
-                  className={cn(
-                    attachOpen ? "text-primary" : "text-muted-foreground",
-                  )}
-                />
-              </Pressable>
+              {textOnly ? null : (
+                <Pressable
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setAttachOpen((open) => !open);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Adjuntar"
+                  className="size-11 items-center justify-center"
+                >
+                  <Icon
+                    as={Paperclip}
+                    size={20}
+                    className={cn(
+                      attachOpen ? "text-primary" : "text-muted-foreground",
+                    )}
+                  />
+                </Pressable>
+              )}
               <TextInput
                 accessibilityLabel="Escribe un mensaje"
-                placeholder="Mensaje"
+                placeholder={placeholder}
                 value={draft}
                 onChangeText={onDraftChange}
                 multiline
-                className="placeholder:text-muted-foreground max-h-24 min-h-11 flex-1 py-2 text-base leading-5 text-foreground"
+                className="placeholder:text-muted-foreground max-h-24 min-h-11 flex-1 px-3 py-2 text-base leading-5 text-foreground"
               />
-              <Pressable
-                onPress={onTakePhoto}
-                accessibilityRole="button"
-                accessibilityLabel="Tomar foto"
-                className="size-11 items-center justify-center"
-              >
-                <Icon as={Camera} size={20} className="text-muted-foreground" />
-              </Pressable>
+              {textOnly ? null : (
+                <Pressable
+                  onPress={onTakePhoto}
+                  accessibilityRole="button"
+                  accessibilityLabel="Tomar foto"
+                  className="size-11 items-center justify-center"
+                >
+                  <Icon as={Camera} size={20} className="text-muted-foreground" />
+                </Pressable>
+              )}
             </>
           )}
         </View>
 
         <Pressable
           onPress={handlePrimary}
-          disabled={isSending && hasText}
+          disabled={isSending || (textOnly && !hasText)}
           accessibilityRole="button"
           accessibilityLabel={
-            isRecording
-              ? "Detener y enviar audio"
-              : hasText
-                ? "Enviar"
-                : "Grabar audio"
+            textOnly
+              ? "Enviar"
+              : isRecording
+                ? "Detener y enviar audio"
+                : hasText
+                  ? "Enviar"
+                  : "Grabar audio"
           }
           className={cn(
             "size-12 items-center justify-center rounded-full bg-primary",
-            isSending && hasText && "opacity-50",
+            (isSending || (textOnly && !hasText)) && "opacity-50",
           )}
         >
           <Icon
-            as={isRecording ? Square : hasText ? Send : Mic}
+            as={
+              textOnly
+                ? Send
+                : isRecording
+                  ? Square
+                  : hasText
+                    ? Send
+                    : Mic
+            }
             size={20}
             className="text-primary-foreground"
           />

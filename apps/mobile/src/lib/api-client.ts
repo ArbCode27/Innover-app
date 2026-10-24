@@ -5,6 +5,10 @@ import {
 } from "@/lib/app-env";
 import { mapApiConversation, mapRealtime } from "@/lib/map-api-message";
 import {
+  multipartResultToResponse,
+  postMultipartFile,
+} from "@/lib/multipart-upload";
+import {
   clearBiometricSession,
   clearSession,
   loadAccessToken,
@@ -19,6 +23,7 @@ import type {
   ApiConversation,
   ApiErrorBody,
   ApiMeResponse,
+  ApiPaymentInstructionsResponse,
   ApiPaymentsResponse,
   ApiRealtimePayload,
   AppChannelSession,
@@ -55,7 +60,12 @@ export class UnauthorizedError extends ApiError {
 }
 
 export class NetworkError extends ApiError {
-  constructor() {
+  /**
+   * Mensaje del fallo nativo de `fetch` (si existe).
+   * El `message` de usuario sigue siendo genérico; features pueden
+   * enriquecer el copy con `causeMessage` (p. ej. transcripción).
+   */
+  constructor(readonly causeMessage?: string) {
     super(NETWORK_NOTICE.description, 0, API_ERROR_CODES.NETWORK);
     this.name = "NetworkError";
   }
@@ -92,6 +102,9 @@ const fallbackMessageForStatus = (status: number) => {
   }
   if (status === 404) {
     return "No encontramos esa cédula en Conexiones Innover.";
+  }
+  if (status === 413) {
+    return "El archivo es demasiado grande. Inténtalo con uno más liviano.";
   }
   if (status === 503) {
     return "Ese servicio no está disponible ahora. Inténtalo más tarde.";
@@ -167,14 +180,27 @@ const handleResponse = async <T>(
   return (await response.json()) as T;
 };
 
+const nativeFetchMessage = (error: unknown): string | undefined => {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    return message.length > 0 ? message : undefined;
+  }
+  if (typeof error === "string") {
+    const message = error.trim();
+    return message.length > 0 ? message : undefined;
+  }
+  return undefined;
+};
+
 const request = async (url: string, init?: RequestInit) => {
   try {
     return await fetch(url, init);
   } catch (error) {
+    const causeMessage = nativeFetchMessage(error);
     if (__DEV__) {
-      console.warn("[api] network", error);
+      console.warn("[api] network", { url, causeMessage, error });
     }
-    throw new NetworkError();
+    throw new NetworkError(causeMessage);
   }
 };
 
@@ -189,6 +215,7 @@ const authorizedHeaders = async (): Promise<Record<string, string>> => {
 
 type SessionApiResponse = {
   token: string;
+  role?: "customer" | "technician" | "supervisor";
   organization: { id: string; name: string; slug: string };
   client: {
     id: number;
@@ -210,48 +237,85 @@ type SessionApiResponse = {
     plan_name?: string | null;
     ppp_profile?: string | null;
     calculated_at?: string | null;
-  };
-  conversation: ApiConversation;
+  } | null;
+  technician?: {
+    id: string;
+    name: string;
+    phone: string | null;
+    document: string | null;
+    is_supervisor: boolean;
+    app_enabled: boolean;
+  } | null;
+  conversation: ApiConversation | null;
   realtime?: ApiRealtimePayload | null;
 };
 
-const toSession = (payload: SessionApiResponse): AppChannelSession => ({
-  token: payload.token,
-  organization: payload.organization,
-  client: {
-    id: payload.client.id,
-    name: payload.client.name,
-    phone: payload.client.phone,
-    cedula: payload.client.cedula ?? undefined,
-    appEnabled: payload.client.app_enabled,
-    zone: payload.client.zone ?? null,
-    wisproLinked: Boolean(payload.client.wispro_linked),
-    wisproId: payload.client.wispro_id ?? null,
-    account: payload.client.account as AppChannelSession["client"]["account"],
-    plan: payload.client.plan ?? null,
-    debt: payload.client.debt ?? null,
-    hasDebt: Boolean(payload.client.has_debt),
-    serviceSuspended: Boolean(payload.client.service_suspended),
-    contractState: payload.client.contract_state ?? null,
-    contractStateLabel: payload.client.contract_state_label ?? null,
-    contractId: payload.client.contract_id ?? null,
-    planName: payload.client.plan_name ?? null,
-    pppProfile: payload.client.ppp_profile ?? null,
-    calculatedAt: payload.client.calculated_at ?? null,
-  },
-  conversation: mapApiConversation(payload.conversation),
-  realtime: mapRealtime(payload.realtime),
-});
+const toSession = (payload: SessionApiResponse): AppChannelSession => {
+  const role =
+    payload.role ||
+    (payload.technician ? "technician" : "customer");
 
-const appendFile = (
-  form: FormData,
-  file: { uri: string; name: string; type: string },
+  return {
+    token: payload.token,
+    role,
+    organization: payload.organization,
+    client: payload.client
+      ? {
+          id: payload.client.id,
+          name: payload.client.name,
+          phone: payload.client.phone,
+          cedula: payload.client.cedula ?? undefined,
+          appEnabled: payload.client.app_enabled,
+          zone: payload.client.zone ?? null,
+          wisproLinked: Boolean(payload.client.wispro_linked),
+          wisproId: payload.client.wispro_id ?? null,
+          account: payload.client
+            .account as NonNullable<AppChannelSession["client"]>["account"],
+          plan: payload.client.plan ?? null,
+          debt: payload.client.debt ?? null,
+          hasDebt: Boolean(payload.client.has_debt),
+          serviceSuspended: Boolean(payload.client.service_suspended),
+          contractState: payload.client.contract_state ?? null,
+          contractStateLabel: payload.client.contract_state_label ?? null,
+          contractId: payload.client.contract_id ?? null,
+          planName: payload.client.plan_name ?? null,
+          pppProfile: payload.client.ppp_profile ?? null,
+          calculatedAt: payload.client.calculated_at ?? null,
+        }
+      : null,
+    technician: payload.technician
+      ? {
+          id: payload.technician.id,
+          name: payload.technician.name,
+          phone: payload.technician.phone,
+          document: payload.technician.document,
+          isSupervisor: Boolean(payload.technician.is_supervisor),
+          appEnabled: payload.technician.app_enabled !== false,
+        }
+      : null,
+    conversation: payload.conversation
+      ? mapApiConversation(payload.conversation)
+      : null,
+    realtime: mapRealtime(payload.realtime),
+  };
+};
+
+const requestMultipart = async (
+  input: Parameters<typeof postMultipartFile>[0],
 ) => {
-  form.append("file", {
-    uri: file.uri,
-    name: file.name,
-    type: file.type,
-  } as unknown as Blob);
+  try {
+    return await postMultipartFile(input);
+  } catch (error) {
+    const causeMessage = nativeFetchMessage(error);
+    if (__DEV__) {
+      console.warn("[api] multipart", {
+        url: input.url,
+        causeMessage,
+        error,
+      });
+    }
+    throw new NetworkError(causeMessage);
+  }
 };
 
 export class ApiClient {
@@ -322,23 +386,26 @@ export class ApiClient {
 
   sendMedia = async (input: SendMediaInput): Promise<SendMessageResponse> => {
     const headers = await authorizedHeaders();
-    const form = new FormData();
-    appendFile(form, {
-      uri: input.uri,
-      name: input.fileName,
-      type: input.mimeType,
-    });
-    form.append("media_type", input.mediaType);
-    if (input.caption?.trim()) {
-      form.append("caption", input.caption.trim());
+    const fields: Record<string, string> = {
+      media_type: input.mediaType,
+    };
+    const caption = input.caption?.trim();
+    if (caption) {
+      fields.caption = caption;
     }
 
-    const response = await request(`${API_BASE_URL}/api/app/messages`, {
-      method: "POST",
+    const upload = await requestMultipart({
+      url: `${API_BASE_URL}/api/app/messages`,
       headers,
-      body: form,
+      uri: input.uri,
+      fileName: input.fileName,
+      mimeType: input.mimeType,
+      fieldName: "file",
+      fields,
     });
-    return handleResponse<SendMessageResponse>(response);
+    return handleResponse<SendMessageResponse>(
+      multipartResultToResponse(upload),
+    );
   };
 
   getTickets = async (status?: string): Promise<GetTicketsResponse> => {
@@ -419,6 +486,180 @@ export class ApiClient {
       headers,
     });
     return handleResponse<ApiPaymentsResponse>(response);
+  };
+
+  getPaymentInstructions = async (options?: {
+    method?: string;
+  }): Promise<ApiPaymentInstructionsResponse> => {
+    const headers = await authorizedHeaders();
+    const query =
+      options?.method && options.method.trim()
+        ? `?method=${encodeURIComponent(options.method.trim())}`
+        : "";
+    const response = await request(
+      `${API_BASE_URL}/api/app/payment-instructions${query}`,
+      {
+        method: "GET",
+        headers,
+      },
+    );
+    return handleResponse<ApiPaymentInstructionsResponse>(response);
+  };
+
+  getTechnicianTickets = async (options?: {
+    includeDone?: boolean;
+  }): Promise<{ tickets: Record<string, unknown>[] }> => {
+    const headers = await authorizedHeaders();
+    const query = options?.includeDone ? "?include_done=1" : "";
+    const response = await request(
+      `${API_BASE_URL}/api/app/technician/tickets${query}`,
+      { method: "GET", headers },
+    );
+    return handleResponse(response);
+  };
+
+  getTechnicianTicket = async (
+    id: string,
+  ): Promise<{ ticket: Record<string, unknown> }> => {
+    const headers = await authorizedHeaders();
+    const response = await request(
+      `${API_BASE_URL}/api/app/technician/tickets/${encodeURIComponent(id)}`,
+      { method: "GET", headers },
+    );
+    return handleResponse(response);
+  };
+
+  closeTechnicianTicket = async (
+    id: string,
+    observation: string,
+  ): Promise<{ ticket: Record<string, unknown> }> => {
+    const headers = await authorizedHeaders();
+    const response = await request(
+      `${API_BASE_URL}/api/app/technician/tickets/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "close", observation }),
+      },
+    );
+    return handleResponse(response);
+  };
+
+  /**
+   * Transcribe audio de cierre de visita (STT en servidor).
+   * POST /api/app/technician/transcribe — multipart campo `file`, JWT app.
+   * No cierra el ticket; solo devuelve `{ text }` para rellenar la observación.
+   */
+  transcribeTechnicianObservation = async (input: {
+    uri: string;
+    mimeType: string;
+    fileName: string;
+  }): Promise<{ text: string }> => {
+    const headers = await authorizedHeaders();
+    const upload = await requestMultipart({
+      url: `${API_BASE_URL}/api/app/technician/transcribe`,
+      headers,
+      uri: input.uri,
+      fileName: input.fileName || "recording.m4a",
+      mimeType: input.mimeType || "audio/m4a",
+      fieldName: "file",
+    });
+    return handleResponse<{ text: string }>(
+      multipartResultToResponse(upload),
+    );
+  };
+
+  getTechnicianMessages = async (
+    afterId?: number,
+  ): Promise<GetMessagesResponse> => {
+    const headers = await authorizedHeaders();
+    const query =
+      afterId != null && afterId > 0
+        ? `?after_id=${encodeURIComponent(String(afterId))}`
+        : "";
+    const response = await request(
+      `${API_BASE_URL}/api/app/technician/messages${query}`,
+      { method: "GET", headers },
+    );
+    return handleResponse<GetMessagesResponse>(response);
+  };
+
+  sendTechnicianText = async (
+    content: string,
+  ): Promise<SendMessageResponse> => {
+    const headers = await authorizedHeaders();
+    const response = await request(
+      `${API_BASE_URL}/api/app/technician/messages`,
+      {
+        method: "POST",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content }),
+      },
+    );
+    return handleResponse<SendMessageResponse>(response);
+  };
+
+  getSupervisorTechnicians = async (): Promise<{
+    technicians: Array<{
+      id: string;
+      name: string;
+      phone: string | null;
+      document: string | null;
+      is_supervisor: boolean;
+    }>;
+  }> => {
+    const headers = await authorizedHeaders();
+    const response = await request(
+      `${API_BASE_URL}/api/app/supervisor/technicians`,
+      { method: "GET", headers },
+    );
+    return handleResponse(response);
+  };
+
+  getSupervisorTickets = async (options?: {
+    status?: string;
+    technicianId?: string;
+  }): Promise<{ tickets: Record<string, unknown>[]; total: number }> => {
+    const headers = await authorizedHeaders();
+    const params = new URLSearchParams();
+    if (options?.status) params.set("status", options.status);
+    if (options?.technicianId) {
+      params.set("technician_id", options.technicianId);
+    }
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const response = await request(
+      `${API_BASE_URL}/api/app/supervisor/tickets${query}`,
+      { method: "GET", headers },
+    );
+    return handleResponse(response);
+  };
+
+  getSupervisorMetrics = async (
+    range: "today" | "7d" | "30d" = "7d",
+  ): Promise<{
+    range: string;
+    metrics: Array<{
+      technician_id: string;
+      name: string;
+      assigned: number;
+      pending: number;
+      closed: number;
+      close_rate_pct: number;
+      avg_close_hours: number | null;
+    }>;
+  }> => {
+    const headers = await authorizedHeaders();
+    const response = await request(
+      `${API_BASE_URL}/api/app/supervisor/metrics?range=${encodeURIComponent(range)}`,
+      { method: "GET", headers },
+    );
+    return handleResponse(response);
   };
 }
 

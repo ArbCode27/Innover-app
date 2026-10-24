@@ -20,6 +20,9 @@ const logPush = (...args: unknown[]) => {
   console.warn("[push]", ...args);
 };
 
+/** Evita spam en Expo Go (register se reintenta con la sesión). */
+let loggedExpoGoSkip = false;
+
 export const devicePlatform = (): PushPlatform => {
   if (Platform.OS === "ios") {
     return "ios";
@@ -79,7 +82,10 @@ export const resolvePushToken = async (): Promise<PushTokenResult> => {
     return { ok: false, reason: "web" };
   }
   if (isRunningInExpoGo()) {
-    logPush("skip", "expo_go");
+    if (!loggedExpoGoSkip) {
+      loggedExpoGoSkip = true;
+      logPush("skip", "expo_go");
+    }
     return { ok: false, reason: "expo_go" };
   }
 

@@ -3,6 +3,7 @@ import {
   authenticateWithBiometrics,
 } from "@/features/auth/biometric-gateway";
 import { hydrateRealtime } from "@/features/auth/session-gateway";
+import { useChatUnreadStore } from "@/features/chat/chat-unread-store";
 import {
   clearBiometricSession,
   clearSession,
@@ -15,15 +16,50 @@ import type { AppProfile } from "@/types/domain";
 import * as React from "react";
 import { Platform } from "react-native";
 
-const profileFromSession = (session: AppChannelSession): AppProfile => ({
-  userId: String(session.client.id),
-  role: "customer",
-  displayName: session.client.name || "Cliente",
-  clientId: session.client.id,
-  technicianId: null,
-  supervisorId: null,
-  loginCedula: session.client.cedula ?? null,
-});
+/** Evita setState/re-suscripciones cuando el payload no cambia de verdad. */
+export const isSameAppSession = (
+  left: AppChannelSession,
+  right: AppChannelSession,
+) =>
+  left.token === right.token &&
+  left.role === right.role &&
+  left.organization.id === right.organization.id &&
+  left.client?.id === right.client?.id &&
+  left.technician?.id === right.technician?.id &&
+  left.conversation?.id === right.conversation?.id &&
+  left.conversation?.humanMode === right.conversation?.humanMode &&
+  left.conversation?.status === right.conversation?.status &&
+  left.realtime?.accessToken === right.realtime?.accessToken &&
+  left.realtime?.expiresAt === right.realtime?.expiresAt &&
+  left.realtime?.conversationId === right.realtime?.conversationId;
+
+const profileFromSession = (session: AppChannelSession): AppProfile => {
+  if (
+    (session.role === "technician" || session.role === "supervisor") &&
+    session.technician
+  ) {
+    return {
+      userId: session.technician.id,
+      role: session.role,
+      displayName: session.technician.name || "Técnico",
+      clientId: null,
+      technicianId: session.technician.id,
+      supervisorId:
+        session.role === "supervisor" ? session.technician.id : null,
+      loginCedula: session.technician.document ?? null,
+    };
+  }
+
+  return {
+    userId: String(session.client?.id ?? ""),
+    role: "customer",
+    displayName: session.client?.name || "Cliente",
+    clientId: session.client?.id ?? null,
+    technicianId: null,
+    supervisorId: null,
+    loginCedula: session.client?.cedula ?? null,
+  };
+};
 
 type AuthSessionValue = {
   isReady: boolean;
@@ -47,16 +83,27 @@ export const AuthSessionProvider = ({
   const signOut = React.useCallback(async () => {
     await clearSession();
     await clearBiometricSession();
+    useChatUnreadStore.getState().clear();
     setSession(null);
   }, []);
 
   const applySession = React.useCallback(async (next: AppChannelSession) => {
-    await saveSession(next);
-    setSession(next);
+    let changed = true;
+    setSession((previous) => {
+      if (previous && isSameAppSession(previous, next)) {
+        changed = false;
+        return previous;
+      }
+      return next;
+    });
+    if (changed) {
+      await saveSession(next);
+    }
   }, []);
 
   const signIn = React.useCallback(
     async (next: AppChannelSession) => {
+      useChatUnreadStore.getState().clear();
       await applySession(next);
     },
     [applySession],

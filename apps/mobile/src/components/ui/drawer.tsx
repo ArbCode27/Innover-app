@@ -14,7 +14,7 @@ import {
   FadeIn,
   FadeOut,
   ReduceMotion,
-  SlideInUp,
+  SlideInDown,
   SlideOutDown,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -94,6 +94,7 @@ const DrawerContent = ({
   className,
   portalHost,
   children,
+  style,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   portalHost?: string;
@@ -104,10 +105,11 @@ const DrawerContent = ({
     <DrawerPortal hostName={portalHost}>
       <DrawerOverlay>
         <NativeOnlyAnimatedView
-          entering={SlideInUp.duration(320)
-            .reduceMotion(ReduceMotion.System)}
+          // Reanimated: SlideInDown entra desde abajo (sube); SlideInUp entra desde arriba.
+          entering={SlideInDown.duration(320).reduceMotion(ReduceMotion.System)}
           exiting={SlideOutDown.duration(220).reduceMotion(ReduceMotion.System)}
           className="w-full"
+          style={{ marginTop: "auto" }}
         >
           <DialogPrimitive.Content
             className={cn(
@@ -117,11 +119,14 @@ const DrawerContent = ({
               }),
               className,
             )}
-            style={{ paddingBottom: Math.max(insets.bottom, 12) }}
+            style={[
+              { paddingBottom: Math.max(insets.bottom, 12), marginBottom: 0 },
+              style,
+            ]}
             {...props}
           >
-            {children}
             <DrawerHandle />
+            {children}
           </DialogPrimitive.Content>
         </NativeOnlyAnimatedView>
       </DrawerOverlay>

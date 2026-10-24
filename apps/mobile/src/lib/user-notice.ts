@@ -19,6 +19,10 @@ const TITLE_BY_CODE: Record<string, string> = {
   [API_ERROR_CODES.APP_SECRET_MISSING]: "No pudimos entrar",
   [API_ERROR_CODES.WRONG_PASSWORD]: "Contraseña incorrecta",
   [API_ERROR_CODES.INVALID_SECRET]: "No pudimos entrar",
+  APP_DISABLED: "App deshabilitada",
+  CLIENT_NOT_FOUND: "Cédula no encontrada",
+  CEDULA_INVALID: "Cédula inválida",
+  ORGANIZATION_INACTIVE: "Organización inactiva",
 };
 
 export const NETWORK_NOTICE: UserNotice = {

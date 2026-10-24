@@ -5,66 +5,49 @@ import Animated, {
   Easing,
   useAnimatedStyle,
   useSharedValue,
-  withDelay,
   withRepeat,
   withSequence,
   withTiming,
 } from "react-native-reanimated";
-import Svg, {
-  Defs,
-  LinearGradient as SvgLinearGradient,
-  RadialGradient,
-  Rect,
-  Stop,
-} from "react-native-svg";
+import Svg, { Defs, RadialGradient, Rect, Stop } from "react-native-svg";
 
-const LOGO = require("../../assets/splash-logo.png");
+/** Logo transparente (sin glow ni fondo). Glow azul/rojo solo en el fondo. */
+const LOGO = require("../../assets/brand-logo.png");
+
 const SCREEN_W = Dimensions.get("window").width;
-const LOGO_W = Math.min(SCREEN_W * 0.86, 380);
-const LOGO_H = LOGO_W * (774 / 1440);
+/** ~58% del ancho: logo completo con aire, sin rozar bordes. */
+const LOGO_W = Math.min(SCREEN_W * 0.58, 280);
+/** brand-logo.png 1502×1100 (transparente, sin glow). */
+const LOGO_ASPECT = 1100 / 1502;
+const LOGO_H = LOGO_W * LOGO_ASPECT;
 
 /**
- * Pantalla de carga in-app (sesión). Logo grande con brillo animado.
- * El splash nativo usa assets/splash.png (mismo asset, más grande).
+ * Pantalla de carga in-app (sesión).
+ * - Fondo blanco + sombras azul/rojo en SVG (no en el PNG).
+ * - `brand-logo.png` con alpha y margen; splash nativo usa `assets/splash.png`.
  */
 export const AppBootScreen = () => {
-  const shineX = useSharedValue(-LOGO_W * 0.55);
   const pulse = useSharedValue(1);
 
   React.useEffect(() => {
-    shineX.value = withRepeat(
-      withSequence(
-        withTiming(LOGO_W * 1.15, {
-          duration: 1600,
-          easing: Easing.inOut(Easing.cubic),
-        }),
-        withDelay(900, withTiming(-LOGO_W * 0.55, { duration: 0 })),
-      ),
-      -1,
-      false,
-    );
     pulse.value = withRepeat(
       withSequence(
-        withTiming(1.03, {
-          duration: 1400,
+        withTiming(1.01, {
+          duration: 1600,
           easing: Easing.inOut(Easing.quad),
         }),
         withTiming(1, {
-          duration: 1400,
+          duration: 1600,
           easing: Easing.inOut(Easing.quad),
         }),
       ),
       -1,
       false,
     );
-  }, [pulse, shineX]);
+  }, [pulse]);
 
   const logoPulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulse.value }],
-  }));
-
-  const shineStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: shineX.value }, { skewX: "-18deg" }],
   }));
 
   return (
@@ -72,7 +55,8 @@ export const AppBootScreen = () => {
       className="flex-1 items-center justify-center bg-white"
       accessibilityLabel="Cargando Star Conectados"
     >
-      <View className="absolute inset-0">
+      {/* Atmósfera de marca: solo en el background, no en la imagen */}
+      <View className="absolute inset-0" pointerEvents="none">
         <Svg
           width="100%"
           height="100%"
@@ -80,11 +64,11 @@ export const AppBootScreen = () => {
           preserveAspectRatio="none"
         >
           <Defs>
-            <RadialGradient id="bootBlue" cx="28%" cy="38%" rx="55%" ry="40%">
+            <RadialGradient id="bootBlue" cx="32%" cy="42%" rx="48%" ry="36%">
               <Stop
                 offset="0%"
                 stopColor="hsl(226 96% 60%)"
-                stopOpacity={0.22}
+                stopOpacity={0.2}
               />
               <Stop
                 offset="100%"
@@ -92,11 +76,11 @@ export const AppBootScreen = () => {
                 stopOpacity={0}
               />
             </RadialGradient>
-            <RadialGradient id="bootRed" cx="72%" cy="58%" rx="50%" ry="38%">
+            <RadialGradient id="bootRed" cx="68%" cy="52%" rx="46%" ry="34%">
               <Stop
                 offset="0%"
                 stopColor="hsl(350 86% 56%)"
-                stopOpacity={0.18}
+                stopOpacity={0.16}
               />
               <Stop
                 offset="100%"
@@ -110,64 +94,14 @@ export const AppBootScreen = () => {
         </Svg>
       </View>
 
-      <View className="z-10 items-center gap-8 px-4">
-        <Animated.View
-          style={[
-            logoPulseStyle,
-            {
-              width: LOGO_W,
-              height: LOGO_H,
-              shadowColor: "hsl(226 96% 60%)",
-              shadowOffset: { width: 0, height: 10 },
-              shadowOpacity: 0.28,
-              shadowRadius: 28,
-              elevation: 10,
-            },
-          ]}
-        >
-          <View
-            className="overflow-hidden rounded-2xl"
-            style={{ width: LOGO_W, height: LOGO_H }}
-          >
-            <Image
-              source={LOGO}
-              accessibilityLabel="Star Conectados"
-              resizeMode="contain"
-              style={{ width: LOGO_W, height: LOGO_H }}
-            />
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                {
-                  position: "absolute",
-                  top: -LOGO_H * 0.2,
-                  bottom: -LOGO_H * 0.2,
-                  width: LOGO_W * 0.38,
-                  opacity: 0.85,
-                },
-                shineStyle,
-              ]}
-            >
-              <Svg width="100%" height="100%">
-                <Defs>
-                  <SvgLinearGradient id="shineSweep" x1="0" y1="0" x2="1" y2="0">
-                    <Stop offset="0%" stopColor="#FFFFFF" stopOpacity={0} />
-                    <Stop offset="45%" stopColor="#FFFFFF" stopOpacity={0.55} />
-                    <Stop offset="50%" stopColor="#FFFFFF" stopOpacity={0.85} />
-                    <Stop offset="55%" stopColor="#FFFFFF" stopOpacity={0.55} />
-                    <Stop offset="100%" stopColor="#FFFFFF" stopOpacity={0} />
-                  </SvgLinearGradient>
-                </Defs>
-                <Rect
-                  x="0"
-                  y="0"
-                  width="100%"
-                  height="100%"
-                  fill="url(#shineSweep)"
-                />
-              </Svg>
-            </Animated.View>
-          </View>
+      <View className="z-10 items-center gap-8 px-8">
+        <Animated.View style={[{ overflow: "visible" }, logoPulseStyle]}>
+          <Image
+            source={LOGO}
+            accessibilityLabel="Star Conectados"
+            resizeMode="contain"
+            style={{ width: LOGO_W, height: LOGO_H, overflow: "visible" }}
+          />
         </Animated.View>
 
         <Text className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">

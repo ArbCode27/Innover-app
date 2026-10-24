@@ -56,11 +56,27 @@ const parseSession = (raw: string | null): AppChannelSession | null => {
   }
   try {
     const parsed = JSON.parse(raw) as AppChannelSession;
-    if (!parsed.token || !parsed.client || !parsed.conversation) {
+    if (!parsed.token || !parsed.organization) {
+      return null;
+    }
+    const role =
+      parsed.role ||
+      (parsed.technician ? "technician" : "customer");
+    if (role === "customer" && !parsed.client) {
+      return null;
+    }
+    if (
+      (role === "technician" || role === "supervisor") &&
+      !parsed.technician
+    ) {
       return null;
     }
     return {
       ...parsed,
+      role,
+      client: parsed.client ?? null,
+      technician: parsed.technician ?? null,
+      conversation: parsed.conversation ?? null,
       realtime: isRealtimeSession(parsed.realtime) ? parsed.realtime : null,
     };
   } catch {
@@ -98,8 +114,10 @@ export const saveSession = async (session: AppChannelSession) => {
     SESSION_KEY,
     JSON.stringify({
       token: session.token,
+      role: session.role,
       organization: session.organization,
       client: session.client,
+      technician: session.technician,
       conversation: session.conversation,
     }),
   );
@@ -126,16 +144,20 @@ export const clearSession = async () => {
 };
 
 export const saveBiometricSession = async (session: AppChannelSession) => {
-  if (session.client.cedula) {
-    await setSecureItem(BIOMETRIC_CEDULA_KEY, session.client.cedula);
+  const cedula =
+    session.client?.cedula || session.technician?.document || null;
+  if (cedula) {
+    await setSecureItem(BIOMETRIC_CEDULA_KEY, cedula);
   }
   await setSecureItem(BIOMETRICS_ENABLED_KEY, "1");
   await setSecureItem(
     BIOMETRIC_SESSION_KEY,
     JSON.stringify({
       token: session.token,
+      role: session.role,
       organization: session.organization,
       client: session.client,
+      technician: session.technician,
       conversation: session.conversation,
     }),
   );

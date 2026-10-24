@@ -21,8 +21,26 @@ const ITEM_GAP = 12;
 const PILL_PAD = 12;
 const FLOAT_GAP = 14;
 const SIDE_GAP = 28;
+/** Aire extra entre el último contenido y la pastilla del menú. */
+const CONTENT_GAP = 16;
 
-export const GLASS_TAB_BAR_HEIGHT = PILL_HEIGHT + FLOAT_GAP + 24;
+/** Altura visual del menú (sin safe-area inferior). */
+export const GLASS_TAB_BAR_HEIGHT = PILL_HEIGHT + FLOAT_GAP + CONTENT_GAP;
+
+/** Espacio inferior para que el tab bar flotante no tape el contenido. */
+export const getGlassTabBarClearance = (bottomInset: number) =>
+  GLASS_TAB_BAR_HEIGHT + Math.max(bottomInset, 0);
+
+export const useGlassTabBarClearance = () => {
+  const insets = useSafeAreaInsets();
+  return getGlassTabBarClearance(insets.bottom);
+};
+
+/** Padding inferior para ScrollView/FlatList bajo el menú flotante (sin fondo sólido). */
+export const useGlassTabBarContentPadding = () => {
+  const paddingBottom = useGlassTabBarClearance();
+  return React.useMemo(() => ({ paddingBottom }), [paddingBottom]);
+};
 
 const isHiddenTabBarStyle = (style: unknown) => {
   if (!style || typeof style !== "object" || Array.isArray(style)) {

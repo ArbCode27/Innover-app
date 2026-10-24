@@ -7,7 +7,7 @@ import { PortalHost } from "@rn-primitives/portal";
 import * as SplashScreen from "expo-splash-screen";
 import { useColorScheme } from "nativewind";
 import * as React from "react";
-import { View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -34,7 +34,10 @@ export const Root = () => {
             <NavigationContainer ref={navigationRef} theme={NAV_THEME[scheme]}>
               <RootNavigator />
             </NavigationContainer>
-            <PortalHost />
+            {/* Host a pantalla completa: si no, el drawer queda flotando con hueco abajo. */}
+            <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+              <PortalHost />
+            </View>
           </AppProviders>
         </View>
       </SafeAreaProvider>

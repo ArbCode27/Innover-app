@@ -13,6 +13,29 @@ const isCasoPriority = (value: string): value is CasoPriority =>
   value === "high" ||
   value === "urgent";
 
+const normalizePriority = (value: unknown): CasoPriority => {
+  if (typeof value !== "string") {
+    return "medium";
+  }
+  const raw = value.trim().toLowerCase();
+  if (isCasoPriority(raw)) {
+    return raw;
+  }
+  if (raw === "baja" || raw === "low") {
+    return "low";
+  }
+  if (raw === "media" || raw === "normal" || raw === "medium") {
+    return "medium";
+  }
+  if (raw === "alta" || raw === "high") {
+    return "high";
+  }
+  if (raw === "urgente" || raw === "urgent" || raw === "critica" || raw === "crítica") {
+    return "urgent";
+  }
+  return "medium";
+};
+
 export const mapApiTicket = (row: ApiTicket): AppCaso => {
   const status = isCasoStatus(row.status) ? row.status : "open";
   const statusLabel =
@@ -26,7 +49,7 @@ export const mapApiTicket = (row: ApiTicket): AppCaso => {
     title: row.title,
     cause: row.cause,
     status,
-    priority: isCasoPriority(row.priority) ? row.priority : "medium",
+    priority: normalizePriority(row.priority),
     clientName: null,
     clientPhone: null,
     mapsUrl: row.maps_url,

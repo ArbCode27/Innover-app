@@ -50,12 +50,17 @@ export const mergeChatSnapshot = (
   options?: { replace?: boolean },
 ): ChatSnapshot => {
   if (!previous || options?.replace) {
-    return incoming;
+    return {
+      conversation: incoming.conversation,
+      messages: upsertMessages([], incoming.messages),
+    };
   }
+  // Conserva optimistas (id < 0) durante catch-up; el send los limpia al confirmar.
+  const pendingOptimistic = previous.messages.filter((message) => message.id < 0);
   return {
     conversation: incoming.conversation,
     messages: upsertMessages(
-      dropOptimistic(previous.messages),
+      [...dropOptimistic(previous.messages), ...pendingOptimistic],
       incoming.messages,
     ),
   };

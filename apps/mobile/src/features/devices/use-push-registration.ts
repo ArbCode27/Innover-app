@@ -44,8 +44,10 @@ export const usePushRegistration = () => {
   const { session } = useAuthSession();
   const queryClient = useQueryClient();
 
+  const sessionToken = session?.token ?? null;
+
   React.useEffect(() => {
-    if (!session) {
+    if (!sessionToken) {
       return;
     }
 
@@ -159,5 +161,5 @@ export const usePushRegistration = () => {
       removeReceived?.remove();
       removeToken?.remove();
     };
-  }, [queryClient, session]);
+  }, [queryClient, sessionToken]);
 };

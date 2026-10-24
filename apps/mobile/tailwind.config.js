@@ -41,6 +41,12 @@ module.exports = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        priority: {
+          low: "hsl(var(--priority-low))",
+          medium: "hsl(var(--priority-medium))",
+          high: "hsl(var(--priority-high))",
+          urgent: "hsl(var(--priority-urgent))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

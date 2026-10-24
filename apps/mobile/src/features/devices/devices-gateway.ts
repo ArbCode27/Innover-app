@@ -312,13 +312,23 @@ const tokenPreview = (token: string) => `${token.slice(0, 28)}…`;
 let lastRegisteredToken: string | null = null;
 let lastRegisteredAt = 0;
 const REREGISTER_COOLDOWN_MS = 60_000;
+const loggedPushSkipReasons = new Set<string>();
 
 export const registerPushIfPossible = async (options?: {
   force?: boolean;
 }): Promise<RegisterPushResult> => {
   const tokenResult = await resolvePushToken();
   if (!tokenResult.ok) {
-    logPushRegister("skip", tokenResult.reason, tokenResult.detail);
+    // expo_go / web: un solo log; el resto solo en reintentos con force.
+    const skipKey = tokenResult.reason;
+    if (
+      options?.force ||
+      (skipKey !== "expo_go" && skipKey !== "web") ||
+      !loggedPushSkipReasons.has(skipKey)
+    ) {
+      loggedPushSkipReasons.add(skipKey);
+      logPushRegister("skip", tokenResult.reason, tokenResult.detail);
+    }
     return {
       registered: false,
       reason: tokenResult.reason,

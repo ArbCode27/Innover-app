@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
+import { useGlassTabBarContentPadding } from "@/components/glass-tab-bar";
 import { ScreenState } from "@/components/screen-state";
 import { useAuthSession } from "@/features/auth/auth-session";
 import {
@@ -32,8 +33,6 @@ import {
   ArrowRight,
   Calendar,
   Clock,
-  ExternalLink,
-  MapPin,
   MessageSquare,
   RefreshCw,
   ShieldCheck,
@@ -41,16 +40,11 @@ import {
   UserCheck,
 } from "lucide-react-native";
 import * as React from "react";
-import {
-  Linking,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  View,
-} from "react-native";
+import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 
 export const CustomerMyTicketScreen = () => {
   const { profile } = useAuthSession();
+  const tabBarContentPadding = useGlassTabBarContentPadding();
   const navigation =
     useNavigation<BottomTabNavigationProp<CustomerTabParamList>>();
 
@@ -101,19 +95,11 @@ export const CustomerMyTicketScreen = () => {
     return "Tu visita está registrada. El horario se confirma cuando el CRM la agenda.";
   };
 
-  const handleOpenMaps = async () => {
-    if (!ticket?.mapsUrl) return;
-    try {
-      await Linking.openURL(ticket.mapsUrl);
-    } catch {
-      // Ignoramos error de apertura de URL externa
-    }
-  };
-
   return (
     <ScrollView
       className="flex-1 bg-background"
-      contentContainerClassName="p-4 gap-5 pb-12"
+      contentContainerClassName="p-4 gap-5"
+      contentContainerStyle={tabBarContentPadding}
       refreshControl={
         <RefreshControl
           refreshing={ticketQuery.isRefetching && !ticketQuery.isPending}
@@ -399,40 +385,6 @@ export const CustomerMyTicketScreen = () => {
                     )}
                   </View>
 
-                  {/* Dirección y Ubicación */}
-                  {ticket.addressText ? (
-                    <View className="rounded-2xl border border-border/80 bg-muted/20 p-3.5 gap-2">
-                      <View className="flex-row items-center gap-2">
-                        <View className="size-7 items-center justify-center rounded-lg bg-cyan-500/15">
-                          <Icon as={MapPin} size={15} className="text-cyan-600 dark:text-cyan-400" />
-                        </View>
-                        <View className="flex-1">
-                          <Text className="text-[10px] font-bold text-muted-foreground uppercase">
-                            Dirección de Atención
-                          </Text>
-                          <Text className="text-xs font-bold text-foreground">
-                            {ticket.addressText}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {ticket.mapsUrl ? (
-                        <Pressable
-                          onPress={() => {
-                            void handleOpenMaps();
-                          }}
-                          accessibilityRole="button"
-                          accessibilityLabel="Abrir ubicación en Google Maps"
-                          className="mt-1 flex-row items-center justify-center gap-2 rounded-xl border border-border/70 bg-card/60 py-2 active:opacity-80"
-                        >
-                          <Icon as={ExternalLink} size={13} className="text-primary" />
-                          <Text className="text-xs font-bold text-primary">
-                            Ver ubicación en Google Maps
-                          </Text>
-                        </Pressable>
-                      ) : null}
-                    </View>
-                  ) : null}
                 </View>
 
                 {/* 5. Alerta de Seguridad del Abonado */}
@@ -441,7 +393,9 @@ export const CustomerMyTicketScreen = () => {
                     Seguridad y Protocolo de Visita
                   </AlertTitle>
                   <AlertDescription className="text-[11px] leading-relaxed text-muted-foreground">
-                    Los técnicos de Conexiones Innover visten uniforme institucional y portan carnet oficial con código QR. No solicitan claves ni pagos en efectivo bajo ningún concepto.
+                    Los técnicos de Conexiones Innover visten uniforme
+                    institucional. No solicitan pagos en efectivo bajo ningún
+                    concepto.
                   </AlertDescription>
                 </Alert>
 

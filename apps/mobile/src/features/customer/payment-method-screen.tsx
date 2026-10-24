@@ -1,12 +1,13 @@
 import type { BillingStackParamList } from "@/app/navigation-types";
 import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
+import { ScreenState } from "@/components/screen-state";
 import { fetchAccountQuote } from "@/features/customer/account-quote-gateway";
 import {
   PaymentMethodRow,
   PaymentStepHeader,
 } from "@/features/customer/payment-chrome";
-import { PAYMENT_METHOD_OPTIONS } from "@/features/customer/payment-instructions-gateway";
+import { fetchPaymentMethodOptions } from "@/features/customer/payment-instructions-gateway";
 import type { PaymentMethodId } from "@/types/domain";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -44,11 +45,17 @@ export const PaymentMethodScreen = () => {
     queryFn: () => fetchAccountQuote(),
   });
 
+  const methodsQuery = useQuery({
+    queryKey: ["payment-method-options"],
+    queryFn: fetchPaymentMethodOptions,
+  });
+
   const handleSelect = (methodId: PaymentMethodId) => {
     navigation.navigate("ConfirmarBanco", { methodId });
   };
 
   const quote = quoteQuery.data;
+  const methods = methodsQuery.data ?? [];
 
   return (
     <View className="flex-1 bg-background">
@@ -62,24 +69,48 @@ export const PaymentMethodScreen = () => {
           description="Elige el método. Los montos salen de tu saldo en el servidor."
         />
 
-        <View className="gap-3">
-          {PAYMENT_METHOD_OPTIONS.map((option) => (
-            <PaymentMethodRow
-              key={option.id}
-              title={option.title}
-              description={option.description}
-              icon={
-                <Icon
-                  as={iconForMethod(option.id)}
-                  size={20}
-                  className="text-primary"
+        <ScreenState
+          isLoading={methodsQuery.isPending}
+          errorMessage={
+            methodsQuery.isError
+              ? "No se pudieron cargar los métodos de pago."
+              : null
+          }
+          onRetry={() => {
+            void methodsQuery.refetch();
+          }}
+        >
+          {methods.length === 0 ? (
+            <View className="rounded-2xl border border-border/80 bg-card/95 p-4 gap-2">
+              <Text className="text-sm font-semibold text-foreground">
+                Métodos no configurados
+              </Text>
+              <Text className="text-sm text-muted-foreground">
+                Tu proveedor aún no publicó datos de pago en la app. Solicítalos
+                por el chat o vuelve a intentar más tarde.
+              </Text>
+            </View>
+          ) : (
+            <View className="gap-3">
+              {methods.map((option) => (
+                <PaymentMethodRow
+                  key={option.id}
+                  title={option.title}
+                  description={option.description}
+                  icon={
+                    <Icon
+                      as={iconForMethod(option.id)}
+                      size={20}
+                      className="text-primary"
+                    />
+                  }
+                  onPress={() => handleSelect(option.id)}
+                  accessibilityLabel={`Pagar con ${option.title}`}
                 />
-              }
-              onPress={() => handleSelect(option.id)}
-              accessibilityLabel={`Pagar con ${option.title}`}
-            />
-          ))}
-        </View>
+              ))}
+            </View>
+          )}
+        </ScreenState>
       </ScrollView>
 
       {quote ? (

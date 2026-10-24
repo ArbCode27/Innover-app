@@ -15,6 +15,7 @@ import {
 import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
 import { InnoverIcon } from "@/components/brand-logo";
+import { useGlassTabBarContentPadding } from "@/components/glass-tab-bar";
 import { ScreenState } from "@/components/screen-state";
 import { useAuthSession } from "@/features/auth/auth-session";
 import { AccountStatusBadge } from "@/features/customer/account-status-badge";
@@ -54,6 +55,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowRight,
+  Check,
   CheckCircle2,
   ChevronRight,
   CreditCard,
@@ -66,12 +68,21 @@ import {
   RefreshCw,
   Ticket,
 } from "lucide-react-native";
+
+const PLAN_BENEFITS = [
+  "Velocidad simétrica real sin límites de descarga ni consumo",
+  "Latencia ultra baja",
+  "Streaming simultáneo en múltiples pantallas sin pausas",
+  "Instalación certificada con fibra drop de alta resistencia",
+  "Soporte técnico directo y monitoreo continuo 24/7",
+] as const;
 import * as React from "react";
 import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 
 export const CustomerHomeScreen = () => {
   const { profile } = useAuthSession();
   const queryClient = useQueryClient();
+  const tabBarContentPadding = useGlassTabBarContentPadding();
   const navigation =
     useNavigation<
       CompositeNavigationProp<
@@ -181,7 +192,8 @@ export const CustomerHomeScreen = () => {
   return (
     <ScrollView
       className="flex-1 bg-background"
-      contentContainerClassName="p-4 gap-5 pb-12"
+      contentContainerClassName="p-4 gap-5"
+      contentContainerStyle={tabBarContentPadding}
       refreshControl={
         <RefreshControl
           refreshing={isRefreshing && !quoteQuery.isPending}
@@ -770,22 +782,44 @@ export const CustomerHomeScreen = () => {
                       </Text>
                     </View>
                   ) : null}
-                  {quote.contractId ? (
+                  {quote.contractStateLabel ? (
                     <View className="flex-row items-start justify-between gap-3">
                       <Text className="shrink-0 text-[11px] font-semibold text-muted-foreground">
-                        Contrato:
+                        Estado:
                       </Text>
                       <Text className="flex-1 text-right text-[11px] font-bold text-foreground">
-                        {quote.contractId}
+                        {quote.contractStateLabel}
                       </Text>
                     </View>
                   ) : null}
-                  {!zoneName && !quote.contractId ? (
+                  {!zoneName && !quote.contractStateLabel ? (
                     <Text className="text-xs text-muted-foreground">
                       No hay más detalles de plan disponibles por ahora.
                     </Text>
                   ) : null}
                 </View>
+
+                {planName ? (
+                  <View className="gap-2">
+                    <Text className="text-xs font-extrabold tracking-wider text-muted-foreground uppercase">
+                      Incluido en tu servicio:
+                    </Text>
+                    {PLAN_BENEFITS.map((benefit) => (
+                      <View key={benefit} className="flex-row items-start gap-2.5">
+                        <View className="mt-0.5 size-4 items-center justify-center rounded-full bg-emerald-500/20">
+                          <Icon
+                            as={Check}
+                            size={11}
+                            className="text-emerald-600 dark:text-emerald-400"
+                          />
+                        </View>
+                        <Text className="flex-1 text-xs leading-relaxed text-foreground">
+                          {benefit}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
 
                 <Button
                   variant="outline"

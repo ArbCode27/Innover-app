@@ -13,9 +13,13 @@ import {
   dropOptimistic,
   upsertMessages,
 } from "@/features/chat/chat-cache";
-import { useChannelLiveStore } from "@/features/chat/channel-live-store";
+import {
+  connectionStatusLabel,
+  useChannelLiveStore,
+} from "@/features/chat/channel-live-store";
 import { useChatFocusStore } from "@/features/chat/chat-focus-store";
 import { ChatComposer } from "@/features/chat/chat-composer";
+import { useChatUnreadStore } from "@/features/chat/chat-unread-store";
 import { useComposerStore } from "@/features/chat/composer-store";
 import { pickChatDocument } from "@/features/chat/document-picker";
 import {
@@ -33,12 +37,13 @@ import {
 } from "@/features/chat/message-bubble";
 import { useKeyboardHeight } from "@/features/chat/use-keyboard-height";
 import { useVoiceRecorder } from "@/features/chat/use-voice-recorder";
+import { loadSession } from "@/lib/session-storage";
 import { noticeFromUnknown } from "@/lib/user-notice";
 import type { ChatSnapshot } from "@/types/app-channel";
 import type { AppMessage, MessageMediaType, OutboundClientDraft } from "@/types/domain";
 import { useIsFocused, useRoute } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { UserRound } from "lucide-react-native";
+import { Radio, UserRound } from "lucide-react-native";
 import * as React from "react";
 import {
   FlatList,
@@ -49,7 +54,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-const POLL_WHEN_OFFLINE_MS = 10_000;
+/** Solo si Realtime no está live y el chat está enfocado. */
+const POLL_WHEN_OFFLINE_MS = 20_000;
 
 const sameSenderGroup = (left: AppMessage, right: AppMessage) =>
   left.type === right.type && left.senderType === right.senderType;
@@ -69,10 +75,11 @@ const readChatIntent = (params: object | undefined) => {
 };
 
 export const ChatScreen = () => {
-  const { session } = useAuthSession();
+  const { session, profile, applySession } = useAuthSession();
   const queryClient = useQueryClient();
   const isFocused = useIsFocused();
   const isLive = useChannelLiveStore((state) => state.isLive);
+  const connectionStatus = useChannelLiveStore((state) => state.status);
   const route = useRoute();
   const draft = useComposerStore((state) => state.draft);
   const failedDraft = useComposerStore((state) => state.failedDraft);
@@ -82,8 +89,12 @@ export const ChatScreen = () => {
   const recorder = useVoiceRecorder();
   const listRef = React.useRef<FlatList<AppMessage>>(null);
   const [pickerError, setPickerError] = React.useState<string | null>(null);
+  const [pullRefreshing, setPullRefreshing] = React.useState(false);
   const outageSentRef = React.useRef(false);
   const confirmDraftRef = React.useRef(false);
+
+  const isFieldRole =
+    profile?.role === "technician" || profile?.role === "supervisor";
 
   React.useEffect(() => {
     useChatFocusStore.getState().setChatFocused(isFocused);
@@ -96,8 +107,60 @@ export const ChatScreen = () => {
     queryKey: CHAT_QUERY_KEY,
     queryFn: () => fetchConversationSnapshot(),
     enabled: Boolean(session),
+    // Con Realtime live no hace falta refetch periódico ni al remount.
+    staleTime: isLive ? 60_000 : 0,
+    refetchOnMount: isLive ? false : true,
+    refetchOnReconnect: !isLive,
     refetchInterval: isLive || !isFocused ? false : POLL_WHEN_OFFLINE_MS,
   });
+
+  // Tras GET de campo: subir conversation + realtime al contexto de auth.
+  React.useEffect(() => {
+    if (!isFieldRole || !snapshotQuery.isSuccess) {
+      return;
+    }
+    let cancelled = false;
+    const sync = async () => {
+      const stored = await loadSession();
+      if (!stored || cancelled) {
+        return;
+      }
+      const needsApply =
+        stored.conversation?.id !== session?.conversation?.id ||
+        stored.realtime?.accessToken !== session?.realtime?.accessToken ||
+        stored.realtime?.conversationId !== session?.realtime?.conversationId;
+      if (needsApply) {
+        await applySession(stored);
+      }
+    };
+    void sync();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    applySession,
+    isFieldRole,
+    session?.conversation?.id,
+    session?.realtime?.accessToken,
+    session?.realtime?.conversationId,
+    snapshotQuery.dataUpdatedAt,
+    snapshotQuery.isSuccess,
+  ]);
+
+  React.useEffect(() => {
+    if (!isFieldRole) {
+      return;
+    }
+    const messages = snapshotQuery.data?.messages ?? [];
+    const incomingIds = messages
+      .filter(
+        (message) =>
+          message.senderType === "agent" || message.senderType === "bot",
+      )
+      .map((message) => message.id)
+      .filter((id) => id > 0);
+    useChatUnreadStore.getState().syncFromMessages(incomingIds, isFocused);
+  }, [isFieldRole, isFocused, snapshotQuery.data?.messages]);
 
   const sendMutation = useMutation({
     mutationFn: sendClientDraft,
@@ -114,7 +177,7 @@ export const ChatScreen = () => {
           conversationId: snapshot.conversation.id,
           type: "in",
           content: payload.content,
-          senderType: "client",
+          senderType: isFieldRole ? "technician" : "client",
           sentBy: null,
           status: "pending",
           createdAt: new Date().toISOString(),
@@ -141,8 +204,8 @@ export const ChatScreen = () => {
           return {
             conversation: {
               id: sent.conversationId,
-              status: session?.conversation.status ?? "abierto",
-              humanMode: session?.conversation.humanMode ?? false,
+              status: session?.conversation?.status ?? "abierto",
+              humanMode: session?.conversation?.humanMode ?? false,
             },
             messages: [sent],
           };
@@ -201,6 +264,12 @@ export const ChatScreen = () => {
       fileName: string;
     } | null>,
   ) => {
+    if (isFieldRole) {
+      setPickerError(
+        "Por ahora el chat de campo solo admite texto. Contacta a oficina por otro canal si necesitas enviar un adjunto.",
+      );
+      return;
+    }
     setPickerError(null);
     try {
       const picked = await pick();
@@ -226,6 +295,12 @@ export const ChatScreen = () => {
   };
 
   const handleShareLocation = async (outage: boolean) => {
+    if (isFieldRole) {
+      setPickerError(
+        "Por ahora el chat de campo solo admite texto.",
+      );
+      return;
+    }
     setPickerError(null);
     try {
       const payload = outage
@@ -242,6 +317,12 @@ export const ChatScreen = () => {
   };
 
   const handleToggleVoice = async () => {
+    if (isFieldRole) {
+      setPickerError(
+        "Por ahora el chat de campo solo admite texto.",
+      );
+      return;
+    }
     if (recorder.isRecording) {
       const recorded = await recorder.handleStop();
       if (!recorded) {
@@ -264,6 +345,9 @@ export const ChatScreen = () => {
   );
 
   React.useEffect(() => {
+    if (isFieldRole) {
+      return;
+    }
     if (intent === "confirm-connection" && !confirmDraftRef.current) {
       confirmDraftRef.current = true;
       setDraft("Ya tengo internet estable.");
@@ -286,7 +370,7 @@ export const ChatScreen = () => {
       }
     };
     void sendOutage();
-  }, [intent, sendMutation, setDraft]);
+  }, [intent, isFieldRole, sendMutation, setDraft]);
 
   const list = snapshotQuery.data?.messages ?? [];
   const humanMode = snapshotQuery.data?.conversation.humanMode ?? false;
@@ -315,7 +399,21 @@ export const ChatScreen = () => {
         Platform.OS === "android" ? { paddingBottom: keyboardHeight } : undefined
       }
     >
-      {humanMode ? (
+      {connectionStatus !== "live" && session ? (
+        <View className="px-4 pt-3">
+          <Alert icon={Radio}>
+            <AlertTitle>{connectionStatusLabel(connectionStatus)}</AlertTitle>
+            <AlertDescription>
+              {connectionStatus === "connecting" ||
+              connectionStatus === "reconnecting"
+                ? "Estamos abriendo el canal en tiempo real. Los mensajes nuevos pueden tardar un momento."
+                : "No hay canal en vivo ahora. El chat se actualiza cada poco mientras reintentamos la conexión."}
+            </AlertDescription>
+          </Alert>
+        </View>
+      ) : null}
+
+      {humanMode && !isFieldRole ? (
         <View className="px-4 pt-3">
           <Alert icon={UserRound}>
             <AlertTitle>Atendido por asesor</AlertTitle>
@@ -326,11 +424,26 @@ export const ChatScreen = () => {
         </View>
       ) : null}
 
+      {isFieldRole && humanMode ? (
+        <View className="px-4 pt-3">
+          <Alert icon={UserRound}>
+            <AlertTitle>Oficina en línea</AlertTitle>
+            <AlertDescription>
+              Un asesor del CRM puede responderte en este hilo.
+            </AlertDescription>
+          </Alert>
+        </View>
+      ) : null}
+
       <ScreenState
         isLoading={snapshotQuery.isPending}
         isEmpty={!snapshotQuery.isPending && list.length === 0}
-        emptyTitle="Sin mensajes"
-        emptyDescription="Escribe para empezar la conversación."
+        emptyTitle={isFieldRole ? "Sin mensajes con oficina" : "Sin mensajes"}
+        emptyDescription={
+          isFieldRole
+            ? "Escribe a oficina para coordinar visitas o pedir apoyo."
+            : "Escribe para empezar la conversación."
+        }
         errorNotice={
           snapshotQuery.isError
             ? noticeFromUnknown(
@@ -362,7 +475,9 @@ export const ChatScreen = () => {
               item.type === "out" &&
               (!previous || !sameSenderGroup(previous, item) || showDay);
             const isLastInGroup =
-              !next || !sameSenderGroup(item, next) || !sameDay(item.createdAt, next.createdAt);
+              !next ||
+              !sameSenderGroup(item, next) ||
+              !sameDay(item.createdAt, next.createdAt);
 
             return (
               <View className="gap-2">
@@ -385,9 +500,12 @@ export const ChatScreen = () => {
           }}
           refreshControl={
             <RefreshControl
-              refreshing={snapshotQuery.isRefetching && !snapshotQuery.isPending}
+              refreshing={pullRefreshing}
               onRefresh={() => {
-                void snapshotQuery.refetch();
+                setPullRefreshing(true);
+                void snapshotQuery.refetch().finally(() => {
+                  setPullRefreshing(false);
+                });
               }}
             />
           }
@@ -431,6 +549,8 @@ export const ChatScreen = () => {
         isSending={sendMutation.isPending}
         isRecording={recorder.isRecording}
         recordingSeconds={recorder.elapsedSeconds}
+        textOnly={isFieldRole}
+        placeholder={isFieldRole ? "Escribe a oficina…" : "Mensaje"}
         onSendText={handleSendText}
         onPickImage={() => {
           void handlePickedMedia("image", "Imagen", pickChatImage);

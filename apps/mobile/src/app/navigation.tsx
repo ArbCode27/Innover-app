@@ -2,7 +2,9 @@ import type {
   CustomerStackParamList,
   CustomerTabParamList,
   RootStackParamList,
+  SupervisorStackParamList,
   SupervisorTabParamList,
+  TechnicianStackParamList,
   TechnicianTabParamList,
 } from "@/app/navigation-types";
 import { UiKitPreviewScreen } from "@/app/ui-kit-preview";
@@ -10,27 +12,30 @@ import { AppBootScreen } from "@/components/app-boot-screen";
 import { AppHeader } from "@/components/app-header";
 import { GlassTabBar } from "@/components/glass-tab-bar";
 import { ChatBackHeader } from "@/features/chat/chat-back-header";
+import { ChatTabIcon } from "@/features/chat/chat-tab-icon";
 import { Icon } from "@/components/ui/icon";
 import { useAuthSession } from "@/features/auth/auth-session";
 import { LoginScreen } from "@/features/auth/login-screen";
 import { ChatScreen } from "@/features/chat/chat-screen";
+import { SupervisorTicketDetailScreen } from "@/features/supervisor/ticket-detail-screen";
 import { CustomerBillingNavigator } from "@/features/customer/billing-navigator";
 import { CustomerContractScreen } from "@/features/customer/contract-screen";
 import { CustomerDevicesScreen } from "@/features/customer/devices-screen";
 import { CustomerFaqScreen } from "@/features/customer/faq-screen";
 import { CustomerHomeScreen } from "@/features/customer/home-screen";
 import { CustomerMyTicketScreen } from "@/features/customer/my-ticket-screen";
+import { SupervisorMetricsScreen } from "@/features/supervisor/metrics-screen";
+import { SupervisorResolvedScreen } from "@/features/supervisor/resolved-screen";
 import { SupervisorTeamScreen } from "@/features/supervisor/team-screen";
-import { SupervisorTechnicianScreen } from "@/features/supervisor/technician-screen";
 import { TechnicianCaseScreen } from "@/features/technician/case-screen";
 import { TechnicianQueueScreen } from "@/features/technician/queue-screen";
+import { TechnicianResolvedScreen } from "@/features/technician/resolved-screen";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import {
-  Activity,
-  FileText,
+  BarChart3,
+  CheckCircle2,
   Home,
-  MessageSquare,
   Ticket,
 } from "lucide-react-native";
 import * as React from "react";
@@ -38,6 +43,7 @@ import * as React from "react";
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const CustomerStack = createNativeStackNavigator<CustomerStackParamList>();
 const CustomerTab = createBottomTabNavigator<CustomerTabParamList>();
+const TechnicianStack = createNativeStackNavigator<TechnicianStackParamList>();
 const TechnicianTab = createBottomTabNavigator<TechnicianTabParamList>();
 const SupervisorTab = createBottomTabNavigator<SupervisorTabParamList>();
 
@@ -63,8 +69,11 @@ const hiddenTabBarStyle = {
   display: "none" as const,
 };
 
-const chatTabOptions = (backRoute: string) => ({
-  title: "Chat",
+const chatTabOptions = (
+  backRoute: string,
+  options?: { field?: boolean; headerTitle?: string; headerSubtitle?: string },
+) => ({
+  title: options?.field ? options.headerTitle ?? "Oficina" : "Chat",
   tabBarStyle: hiddenTabBarStyle,
   header: ({
     navigation,
@@ -72,13 +81,20 @@ const chatTabOptions = (backRoute: string) => ({
     navigation: { navigate: (name: string) => void };
   }) => (
     <ChatBackHeader
+      variant={options?.field ? "field" : "customer"}
+      title={options?.headerTitle}
+      subtitle={options?.headerSubtitle}
       onBack={() => {
         navigation.navigate(backRoute);
       }}
     />
   ),
   tabBarIcon: ({ color, size }: { color: string; size: number }) => (
-    <Icon as={MessageSquare} size={size} color={color} />
+    <ChatTabIcon
+      color={color}
+      size={size}
+      showUnreadBadge={Boolean(options?.field)}
+    />
   ),
 });
 
@@ -112,7 +128,7 @@ const CustomerTabs = () => {
       <CustomerTab.Screen
         name="Chat"
         component={ChatScreen}
-        options={chatTabOptions("Inicio")}
+        options={chatTabOptions("Inicio", { field: false })}
       />
       <CustomerTab.Screen
         name="Mi ticket"
@@ -165,7 +181,7 @@ const CustomerNavigator = () => {
   );
 };
 
-const TechnicianNavigator = () => {
+const TechnicianTabs = () => {
   return (
     <TechnicianTab.Navigator
       initialRouteName="Cola"
@@ -175,7 +191,8 @@ const TechnicianNavigator = () => {
         header: ({ route }) => (
           <AppHeader subtitle={`TÉCNICO · ${route.name.toUpperCase()}`} />
         ),
-      }}>
+      }}
+    >
       <TechnicianTab.Screen
         name="Cola"
         component={TechnicianQueueScreen}
@@ -189,15 +206,19 @@ const TechnicianNavigator = () => {
       <TechnicianTab.Screen
         name="Chat"
         component={ChatScreen}
-        options={chatTabOptions("Cola")}
+        options={chatTabOptions("Cola", {
+          field: true,
+          headerTitle: "Oficina",
+          headerSubtitle: "Soporte de campo",
+        })}
       />
       <TechnicianTab.Screen
-        name="Caso"
-        component={TechnicianCaseScreen}
+        name="Resueltos"
+        component={TechnicianResolvedScreen}
         options={{
-          title: "Caso",
+          title: "Resueltos",
           tabBarIcon: ({ color, size }) => (
-            <Icon as={Activity} size={size} color={color} />
+            <Icon as={CheckCircle2} size={size} color={color} />
           ),
         }}
       />
@@ -205,7 +226,29 @@ const TechnicianNavigator = () => {
   );
 };
 
-const SupervisorNavigator = () => {
+const TechnicianNavigator = () => {
+  return (
+    <TechnicianStack.Navigator>
+      <TechnicianStack.Screen
+        name="TechnicianTabs"
+        component={TechnicianTabs}
+        options={{ headerShown: false }}
+      />
+      <TechnicianStack.Screen
+        name="Caso"
+        component={TechnicianCaseScreen}
+        options={{
+          headerShown: true,
+          title: "Detalle del caso",
+        }}
+      />
+    </TechnicianStack.Navigator>
+  );
+};
+
+const SupervisorStack = createNativeStackNavigator<SupervisorStackParamList>();
+
+const SupervisorTabs = () => {
   return (
     <SupervisorTab.Navigator
       initialRouteName="Equipo"
@@ -227,21 +270,46 @@ const SupervisorNavigator = () => {
         }}
       />
       <SupervisorTab.Screen
-        name="Técnico"
-        component={SupervisorTechnicianScreen}
+        name="Resueltos"
+        component={SupervisorResolvedScreen}
         options={{
-          title: "Técnico",
+          title: "Resueltos",
           tabBarIcon: ({ color, size }) => (
-            <Icon as={FileText} size={size} color={color} />
+            <Icon as={CheckCircle2} size={size} color={color} />
           ),
         }}
       />
       <SupervisorTab.Screen
-        name="Chat"
-        component={ChatScreen}
-        options={chatTabOptions("Equipo")}
+        name="Métricas"
+        component={SupervisorMetricsScreen}
+        options={{
+          title: "Métricas",
+          tabBarIcon: ({ color, size }) => (
+            <Icon as={BarChart3} size={size} color={color} />
+          ),
+        }}
       />
     </SupervisorTab.Navigator>
+  );
+};
+
+const SupervisorNavigator = () => {
+  return (
+    <SupervisorStack.Navigator>
+      <SupervisorStack.Screen
+        name="SupervisorTabs"
+        component={SupervisorTabs}
+        options={{ headerShown: false }}
+      />
+      <SupervisorStack.Screen
+        name="TicketDetalle"
+        component={SupervisorTicketDetailScreen}
+        options={{
+          headerShown: true,
+          title: "Detalle del ticket",
+        }}
+      />
+    </SupervisorStack.Navigator>
   );
 };
 

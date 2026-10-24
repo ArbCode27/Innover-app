@@ -1,4 +1,4 @@
-import type { TechnicianTabParamList } from "@/app/navigation-types";
+import type { TechnicianStackParamList } from "@/app/navigation-types";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,40 +10,61 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
 import { Textarea } from "@/components/ui/textarea";
 import { ScreenState } from "@/components/screen-state";
 import { useAuthSession } from "@/features/auth/auth-session";
-import { formatTicketWindow } from "@/features/customer/format-window";
-import { TicketStatusBadge } from "@/features/customer/ticket-status-badge";
+import {
+  formatTicketInstant,
+  formatTicketWindow,
+} from "@/features/customer/format-window";
+import { ticketStatusLabel } from "@/features/customer/ticket-status-badge";
 import { useVoiceRecorder } from "@/features/chat/use-voice-recorder";
+import {
+  CLOSE_OBSERVATION_MAX_CHARS,
+  transcribeCloseObservation,
+} from "@/features/technician/close-observation-transcribe";
+import {
+  openCasoInMaps,
+  resolveCasoMapsUrl,
+} from "@/features/technician/maps-opener";
+import { TicketPriorityBadge } from "@/features/technician/ticket-priority-badge";
+import { ticketPriorityChrome } from "@/features/technician/ticket-priority";
 import {
   closeTechnicianVisit,
   fetchTechnicianCaso,
 } from "@/features/technician/technician-gateway";
 import {
-  openCasoInMaps,
-  resolveCasoMapsUrl,
-} from "@/features/technician/maps-opener";
-import {
   technicianCasoKey,
   technicianQueueKey,
+  technicianResolvedKey,
   useTechnicianCasosRealtime,
 } from "@/features/technician/use-casos-realtime";
-import { useRoute, type RouteProp } from "@react-navigation/native";
+import { toUserFacingMessage } from "@/lib/user-facing-error";
+import { cn } from "@/lib/utils";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert, Mic, Square } from "lucide-react-native";
+import {
+  CalendarCheck2,
+  CheckCircle2,
+  CircleAlert,
+  Clock3,
+  ImageIcon,
+  MapPin,
+  Mic,
+  Navigation,
+  Phone,
+  Square,
+  Ticket,
+  Wrench,
+} from "lucide-react-native";
 import * as React from "react";
 import {
+  ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -51,38 +72,57 @@ import {
   View,
 } from "react-native";
 
-const CaseRow = ({ label, value }: { label: string; value: string }) => (
-  <View className="gap-1">
-    <Text variant="muted">{label}</Text>
-    <Text>{value}</Text>
+const InfoRow = ({
+  icon,
+  label,
+  value,
+  accentClassName,
+}: {
+  icon: typeof MapPin;
+  label: string;
+  value: string;
+  accentClassName: string;
+}) => (
+  <View className="flex-row items-start gap-3">
+    <View
+      className={cn(
+        "mt-0.5 h-9 w-9 items-center justify-center rounded-xl bg-card",
+        "border border-border/70",
+      )}
+    >
+      <Icon as={icon} size={18} className={accentClassName} />
+    </View>
+    <View className="min-w-0 flex-1 gap-0.5">
+      <Text className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </Text>
+      <Text className="text-base text-foreground">{value}</Text>
+    </View>
   </View>
 );
 
 export const TechnicianCaseScreen = () => {
   const { profile } = useAuthSession();
   const queryClient = useQueryClient();
-  const route = useRoute<RouteProp<TechnicianTabParamList, "Caso">>();
-  const casoId = route.params?.casoId;
+  const navigation =
+    useNavigation<NativeStackNavigationProp<TechnicianStackParamList>>();
+  const route = useRoute<RouteProp<TechnicianStackParamList, "Caso">>();
+  const casoId = route.params.casoId;
   const employeeId = profile?.technicianId ?? null;
   const recorder = useVoiceRecorder();
   const [observation, setObservation] = React.useState("");
   const [audioReady, setAudioReady] = React.useState(false);
+  const [isTranscribing, setIsTranscribing] = React.useState(false);
+  const [transcribeError, setTranscribeError] = React.useState<string | null>(
+    null,
+  );
   const [needsObservation, setNeedsObservation] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [mapsError, setMapsError] = React.useState<string | null>(null);
 
   useTechnicianCasosRealtime(employeeId);
 
-  const observationForClose = () => {
-    const text = observation.trim();
-    if (text.length >= 3) {
-      return text;
-    }
-    if (audioReady) {
-      return "Nota de voz de cierre";
-    }
-    return "";
-  };
+  const observationForClose = () => observation.trim();
 
   const casoQuery = useQuery({
     queryKey: technicianCasoKey(employeeId, casoId),
@@ -101,16 +141,25 @@ export const TechnicianCaseScreen = () => {
       setNeedsObservation(false);
       setObservation("");
       setAudioReady(false);
+      setTranscribeError(null);
       await queryClient.invalidateQueries({
         queryKey: technicianQueueKey(employeeId),
       });
       await queryClient.invalidateQueries({
+        queryKey: technicianResolvedKey(employeeId),
+      });
+      await queryClient.invalidateQueries({
         queryKey: technicianCasoKey(employeeId, casoId),
       });
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      }
     },
   });
 
-  const hasObservation = observation.trim().length >= 3 || audioReady;
+  // Cierre siempre con texto ≥3 (escrito o transcrito por IA).
+  const hasObservation = observation.trim().length >= 3;
+  const observationLength = observation.trim().length;
   const caso = casoQuery.data ?? null;
   const canClose =
     caso != null && (caso.status === "open" || caso.status === "scheduled");
@@ -118,8 +167,12 @@ export const TechnicianCaseScreen = () => {
   const windowLabel = caso
     ? formatTicketWindow(caso.windowStart, caso.windowEnd)
     : null;
+  const closedAtLabel = caso ? formatTicketInstant(caso.closedAt) : null;
   const ticketLabel =
     caso?.wisproPublicId != null ? `#${caso.wisproPublicId}` : null;
+  const chrome = caso ? ticketPriorityChrome(caso.priority) : null;
+  const clientName = caso?.clientName?.trim() || "Cliente";
+  const statusLabel = caso ? ticketStatusLabel(caso.status) : "";
 
   const handleReady = () => {
     if (!hasObservation) {
@@ -132,19 +185,43 @@ export const TechnicianCaseScreen = () => {
   };
 
   const handleVoice = async () => {
+    if (isTranscribing) {
+      return;
+    }
     if (recorder.isRecording) {
       const recorded = await recorder.handleStop();
-      if (recorded) {
+      if (!recorded) {
+        return;
+      }
+      setIsTranscribing(true);
+      setTranscribeError(null);
+      setAudioReady(false);
+      try {
+        const text = await transcribeCloseObservation(profile, recorded);
+        setObservation(text);
         setAudioReady(true);
         setNeedsObservation(false);
+      } catch (error) {
+        if (__DEV__) {
+          console.warn("[case] transcribe UI", error);
+        }
+        setTranscribeError(
+          toUserFacingMessage(
+            error,
+            "No se pudo transcribir el audio. Inténtalo de nuevo.",
+          ),
+        );
+      } finally {
+        setIsTranscribing(false);
       }
       return;
     }
+    setTranscribeError(null);
     await recorder.handleStart();
   };
 
   const handleOpenMaps = async () => {
-    if (!caso) {
+    if (!caso || !mapsUrl) {
       return;
     }
     setMapsError(null);
@@ -152,9 +229,10 @@ export const TechnicianCaseScreen = () => {
       await openCasoInMaps(caso);
     } catch (error) {
       setMapsError(
-        error instanceof Error
-          ? error.message
-          : "No se pudo abrir Maps.",
+        toUserFacingMessage(
+          error,
+          "No se pudo abrir Maps. Inténtalo de nuevo.",
+        ),
       );
     }
   };
@@ -189,56 +267,132 @@ export const TechnicianCaseScreen = () => {
           void casoQuery.refetch();
         }}
       >
-        {caso ? (
-          <ScrollView contentContainerClassName="gap-4 p-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>{caso.clientName ?? "Cliente"}</CardTitle>
-                <CardDescription>
-                  {ticketLabel ? `Ticket ${ticketLabel} · ` : ""}
-                  {caso.title}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="gap-3">
-                <TicketStatusBadge status={caso.status} />
-                <CaseRow
-                  label="Causa"
-                  value={caso.cause?.trim() || caso.title}
-                />
-                <CaseRow
-                  label="Zona"
-                  value={caso.addressText?.trim() || "Sin zona"}
-                />
-                <CaseRow
-                  label="Ventana horaria"
-                  value={windowLabel ?? "Sin ventana asignada todavía"}
-                />
-                {caso.clientPhone ? (
-                  <CaseRow label="Teléfono" value={caso.clientPhone} />
-                ) : null}
-                {caso.resolutionObservation ? (
-                  <CaseRow
-                    label="Observación"
-                    value={caso.resolutionObservation}
-                  />
-                ) : null}
-              </CardContent>
-            </Card>
+        {caso && chrome ? (
+          <ScrollView
+            contentContainerClassName="gap-4 p-4 pb-10"
+            keyboardShouldPersistTaps="handled"
+          >
+            <View
+              className={cn(
+                "overflow-hidden rounded-2xl border bg-card shadow-sm shadow-black/5",
+                chrome.border,
+              )}
+            >
+              <View className="flex-row">
+                <View className={cn("w-1.5 self-stretch", chrome.bar)} />
+                <View className={cn("flex-1 gap-4 p-4", chrome.tint)}>
+                  <View className="gap-2">
+                    <Text className="text-xl font-semibold text-foreground">
+                      {clientName}
+                    </Text>
+                    <View className="flex-row flex-wrap items-center gap-2">
+                      <TicketPriorityBadge
+                        priority={caso.priority}
+                        priorityLabel={caso.priorityLabel}
+                      />
+                      <Badge variant="outline" className="shrink-0 px-2.5">
+                        <Text className="text-xs font-medium text-foreground">
+                          {statusLabel}
+                        </Text>
+                      </Badge>
+                      {ticketLabel ? (
+                        <Badge
+                          variant="secondary"
+                          className="shrink-0 gap-1 px-2.5"
+                        >
+                          <Icon
+                            as={Ticket}
+                            size={12}
+                            className="text-secondary-foreground"
+                          />
+                          <Text className="text-xs font-medium text-secondary-foreground">
+                            {ticketLabel}
+                          </Text>
+                        </Badge>
+                      ) : null}
+                    </View>
+                    <Text className="text-base text-muted-foreground">
+                      {caso.title}
+                    </Text>
+                  </View>
+
+                  <View className="gap-3.5 rounded-2xl border border-border/70 bg-card/90 px-3.5 py-3.5">
+                    <InfoRow
+                      icon={Wrench}
+                      label="Causa"
+                      value={caso.cause?.trim() || caso.title}
+                      accentClassName={chrome.accentText}
+                    />
+                    <InfoRow
+                      icon={MapPin}
+                      label="Zona"
+                      value={caso.addressText?.trim() || "Sin zona"}
+                      accentClassName={chrome.accentText}
+                    />
+                    <InfoRow
+                      icon={Clock3}
+                      label="Ventana horaria"
+                      value={windowLabel ?? "Sin ventana asignada todavía"}
+                      accentClassName={chrome.accentText}
+                    />
+                    {!canClose && closedAtLabel ? (
+                      <InfoRow
+                        icon={CalendarCheck2}
+                        label="Fecha de cierre"
+                        value={closedAtLabel}
+                        accentClassName={chrome.accentText}
+                      />
+                    ) : null}
+                    {caso.clientPhone ? (
+                      <InfoRow
+                        icon={Phone}
+                        label="Teléfono"
+                        value={caso.clientPhone}
+                        accentClassName={chrome.accentText}
+                      />
+                    ) : null}
+                  </View>
+
+                  {mapsUrl ? (
+                    <View className="w-full gap-2">
+                      <Button
+                        onPress={() => {
+                          void handleOpenMaps();
+                        }}
+                        accessibilityLabel="Abrir en Maps"
+                        className="w-full"
+                      >
+                        <Icon
+                          as={Navigation}
+                          size={18}
+                          className="text-primary-foreground"
+                        />
+                        <Text>Abrir en Maps</Text>
+                      </Button>
+                      {mapsError ? (
+                        <Text className="text-sm text-destructive">
+                          {mapsError}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+            </View>
 
             {caso.facadeMediaUrl ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Fachada</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Image
-                    source={{ uri: caso.facadeMediaUrl }}
-                    className="h-48 w-full rounded-lg"
-                    accessibilityLabel="Foto de fachada"
-                    resizeMode="cover"
-                  />
-                </CardContent>
-              </Card>
+              <View className="overflow-hidden rounded-2xl border border-border bg-card">
+                <View className="flex-row items-center gap-2 border-b border-border px-4 py-3">
+                  <Icon as={ImageIcon} size={18} className="text-primary" />
+                  <Text className="font-semibold text-foreground">Fachada</Text>
+                </View>
+                <Image
+                  source={{ uri: caso.facadeMediaUrl }}
+                  className="h-52 w-full"
+                  accessibilityLabel="Foto de fachada"
+                  resizeMode="cover"
+                />
+              </View>
             ) : (
               <Alert icon={CircleAlert}>
                 <AlertTitle>Sin foto de fachada</AlertTitle>
@@ -248,86 +402,169 @@ export const TechnicianCaseScreen = () => {
               </Alert>
             )}
 
-            <Button
-              variant="outline"
-              disabled={!mapsUrl}
-              onPress={() => {
-                void handleOpenMaps();
-              }}
-              accessibilityLabel="Abrir en Maps"
-            >
-              <Text>{mapsUrl ? "Abrir en Maps" : "Sin Maps"}</Text>
-            </Button>
-            {mapsError ? (
-              <Text className="text-destructive">{mapsError}</Text>
+            {!canClose && (caso.resolutionObservation || closedAtLabel) ? (
+              <View className="gap-2 rounded-2xl border border-emerald-500/35 bg-emerald-500/10 p-4">
+                <View className="flex-row items-center gap-2">
+                  <Icon
+                    as={CheckCircle2}
+                    size={18}
+                    className="text-emerald-700 dark:text-emerald-300"
+                  />
+                  <Text className="font-semibold text-emerald-700 dark:text-emerald-300">
+                    Visita cerrada
+                  </Text>
+                </View>
+                {closedAtLabel ? (
+                  <Text className="text-sm text-muted-foreground">
+                    Cerrado: {closedAtLabel}
+                  </Text>
+                ) : null}
+                {caso.resolutionObservation ? (
+                  <Text className="text-base text-foreground">
+                    {caso.resolutionObservation}
+                  </Text>
+                ) : null}
+              </View>
             ) : null}
 
             {canClose ? (
-              <View className="gap-3">
-                <Text>Observación de cierre</Text>
-                <Textarea
-                  accessibilityLabel="Observación de cierre"
-                  placeholder="Qué hiciste en la visita"
-                  value={observation}
-                  onChangeText={(value) => {
-                    setObservation(value);
-                    if (value.trim().length >= 3) {
-                      setNeedsObservation(false);
-                    }
-                  }}
-                  numberOfLines={4}
-                />
+              <View className="gap-4 rounded-2xl border border-primary/25 bg-primary/5 p-4">
+                <View className="gap-1">
+                  <Text className="text-lg font-semibold text-foreground">
+                    Finalizar visita
+                  </Text>
+                  <Text variant="muted">
+                    Escribe el reporte o dictalo por audio. La IA lo transcribe
+                    y puedes editarlo antes de cerrar (mínimo 3 caracteres).
+                  </Text>
+                </View>
+
+                <View className="gap-2">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-sm font-medium text-foreground">
+                      Observación de cierre
+                    </Text>
+                    <Text
+                      className={cn(
+                        "text-xs",
+                        hasObservation
+                          ? "text-emerald-700 dark:text-emerald-300"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {observationLength}/{CLOSE_OBSERVATION_MAX_CHARS}
+                    </Text>
+                  </View>
+                  <Textarea
+                    accessibilityLabel="Observación de cierre"
+                    placeholder="Ej.: se cambió el conector y quedó operativo"
+                    value={observation}
+                    editable={!isTranscribing}
+                    maxLength={CLOSE_OBSERVATION_MAX_CHARS}
+                    onChangeText={(value) => {
+                      setObservation(value);
+                      if (value.trim().length >= 3) {
+                        setNeedsObservation(false);
+                      }
+                    }}
+                    numberOfLines={5}
+                    className="min-h-28 rounded-xl bg-card"
+                  />
+                </View>
+
                 <Button
-                  variant="outline"
+                  variant={recorder.isRecording ? "destructive" : "outline"}
                   onPress={() => {
                     void handleVoice();
                   }}
+                  disabled={isTranscribing || closeMutation.isPending}
                   accessibilityLabel={
                     recorder.isRecording
-                      ? "Detener grabación"
-                      : "Grabar observación en audio"
+                      ? "Detener grabación y transcribir"
+                      : isTranscribing
+                        ? "Transcribiendo audio"
+                        : "Grabar reporte por voz"
                   }
+                  className="w-full"
                 >
-                  <Icon
-                    as={recorder.isRecording ? Square : Mic}
-                    className="size-4"
-                  />
+                  {isTranscribing ? (
+                    <ActivityIndicator accessibilityLabel="Transcribiendo" />
+                  ) : (
+                    <Icon
+                      as={recorder.isRecording ? Square : Mic}
+                      size={18}
+                      className={
+                        recorder.isRecording
+                          ? "text-white"
+                          : "text-foreground"
+                      }
+                    />
+                  )}
                   <Text>
-                    {recorder.isRecording
-                      ? "Detener"
-                      : audioReady
-                        ? "Nota de voz lista"
-                        : "Grabar audio"}
+                    {isTranscribing
+                      ? "Transcribiendo…"
+                      : recorder.isRecording
+                        ? `Detener y transcribir (${recorder.elapsedSeconds}s)`
+                        : audioReady
+                          ? "Volver a grabar audio"
+                          : "Dictar reporte por voz"}
                   </Text>
                 </Button>
+
+                {audioReady && hasObservation ? (
+                  <Text variant="muted">
+                    Transcripción lista. Revísala o edítala y confirma el
+                    cierre.
+                  </Text>
+                ) : null}
                 {recorder.errorMessage ? (
-                  <Text className="text-destructive">
+                  <Text className="text-sm text-destructive">
                     {recorder.errorMessage}
+                  </Text>
+                ) : null}
+                {transcribeError ? (
+                  <Text className="text-sm text-destructive">
+                    {transcribeError}
                   </Text>
                 ) : null}
                 {needsObservation ? (
                   <Alert icon={CircleAlert} variant="destructive">
                     <AlertTitle>Falta la observación</AlertTitle>
                     <AlertDescription>
-                      Escribe o graba el reporte. No se cierra con solo
-                      «Listo».
+                      Escribe o dicta al menos 3 caracteres para cerrar la
+                      visita.
                     </AlertDescription>
                   </Alert>
                 ) : null}
                 {closeMutation.isError ? (
-                  <Text className="text-destructive">
-                    {closeMutation.error instanceof Error
-                      ? closeMutation.error.message
-                      : "No se pudo cerrar la visita."}
+                  <Text className="text-sm text-destructive">
+                    {toUserFacingMessage(
+                      closeMutation.error,
+                      "No se pudo cerrar la visita. Inténtalo de nuevo.",
+                    )}
                   </Text>
                 ) : null}
+
                 <Button
+                  size="lg"
                   onPress={handleReady}
-                  disabled={closeMutation.isPending}
-                  accessibilityLabel="Listo"
+                  disabled={
+                    closeMutation.isPending ||
+                    isTranscribing ||
+                    recorder.isRecording
+                  }
+                  accessibilityLabel="Cerrar visita"
+                  className="w-full"
                 >
+                  <Icon
+                    as={CheckCircle2}
+                    size={18}
+                    className="text-primary-foreground"
+                  />
                   <Text>
-                    {closeMutation.isPending ? "Cerrando…" : "Listo"}
+                    {closeMutation.isPending
+                      ? "Cerrando visita…"
+                      : "Cerrar visita"}
                   </Text>
                 </Button>
               </View>
@@ -358,7 +595,7 @@ export const TechnicianCaseScreen = () => {
                 closeMutation.mutate();
               }}
             >
-              <Text>Cerrar visita</Text>
+              <Text>Confirmar cierre</Text>
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

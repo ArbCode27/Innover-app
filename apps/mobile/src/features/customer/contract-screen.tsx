@@ -11,7 +11,10 @@ import { Icon } from "@/components/ui/icon";
 import { Text } from "@/components/ui/text";
 import { ScreenState } from "@/components/screen-state";
 import { AccountStatusBadge } from "@/features/customer/account-status-badge";
-import { fetchContractSnapshot } from "@/features/customer/account-quote-gateway";
+import {
+  fetchAccountQuote,
+  fetchContractSnapshot,
+} from "@/features/customer/account-quote-gateway";
 import { useQuery } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react-native";
 import {
@@ -54,10 +57,18 @@ export const CustomerContractScreen = () => {
     queryKey: ["contract-snapshot"],
     queryFn: fetchContractSnapshot,
   });
+  const quoteQuery = useQuery({
+    queryKey: ["account-quote"],
+    queryFn: () => fetchAccountQuote(),
+  });
 
   const contract = contractQuery.data;
+  const planName =
+    contract?.planName?.trim() ||
+    quoteQuery.data?.planName?.trim() ||
+    null;
   const contractBadge =
-    contract?.contractId ||
+    planName ||
     contract?.contractStateLabel ||
     (contract?.wisproLinked === false ? "Sin vínculo" : null);
 
@@ -181,7 +192,7 @@ export const CustomerContractScreen = () => {
                 <ContractField
                   icon={Wifi}
                   label="Plan"
-                  value={contract.planName ?? "No disponible"}
+                  value={planName ?? "No disponible"}
                 />
                 <ContractField
                   icon={MapPin}

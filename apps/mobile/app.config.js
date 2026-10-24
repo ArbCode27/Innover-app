@@ -41,7 +41,9 @@ const apiUrl = (
   "https://innover-flow.vercel.app"
 ).trim();
 
+/** Expone app.json + secretos de entorno (API / canal app). */
 module.exports = {
+  ...appJson,
   expo: {
     ...appJson.expo,
     extra: {

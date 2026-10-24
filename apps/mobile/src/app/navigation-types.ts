@@ -27,19 +27,29 @@ export type CustomerStackParamList = {
 export type TechnicianTabParamList = {
   Cola: undefined;
   Chat: undefined;
-  Caso: { casoId?: string } | undefined;
+  Resueltos: undefined;
+};
+
+export type TechnicianStackParamList = {
+  TechnicianTabs: NavigatorScreenParams<TechnicianTabParamList> | undefined;
+  Caso: { casoId: string };
 };
 
 export type SupervisorTabParamList = {
   Equipo: undefined;
-  Técnico: undefined;
-  Chat: undefined;
+  Resueltos: undefined;
+  Métricas: undefined;
+};
+
+export type SupervisorStackParamList = {
+  SupervisorTabs: NavigatorScreenParams<SupervisorTabParamList> | undefined;
+  TicketDetalle: { casoId: string };
 };
 
 export type RootStackParamList = {
   Login: undefined;
   CustomerApp: NavigatorScreenParams<CustomerStackParamList> | undefined;
-  TechnicianApp: NavigatorScreenParams<TechnicianTabParamList> | undefined;
-  SupervisorApp: NavigatorScreenParams<SupervisorTabParamList> | undefined;
+  TechnicianApp: NavigatorScreenParams<TechnicianStackParamList> | undefined;
+  SupervisorApp: NavigatorScreenParams<SupervisorStackParamList> | undefined;
   UiKitPreview: undefined;
 };

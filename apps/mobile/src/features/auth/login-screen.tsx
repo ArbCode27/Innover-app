@@ -474,7 +474,8 @@ export const LoginScreen = () => {
                 </Text>
                 <RedAccentBar />
                 <Text className="pt-1 text-sm leading-relaxed text-muted-foreground">
-                  Ingresa tu cédula y tu contraseña para acceder a tu cuenta.
+                  Ingresa tu cédula y contraseña. Clientes, técnicos y
+                  supervisores usan el mismo acceso.
                 </Text>
               </View>
 

@@ -1,5 +1,4 @@
 import {
-  CASO_SELECT_COLUMNS,
   mapCrmCasoRow,
   type CrmCasoRow,
 } from "@/features/technician/caso-mapper";
@@ -7,19 +6,9 @@ import {
   MOCK_TECHNICIAN_DIRECTORY,
   listAllMockCasos,
 } from "@/features/technician/technician-gateway";
-import { lookupTechnicianAsTyped } from "@/features/supervisor/technician-name-lookup";
-import {
-  countTeamFilters,
-  filterTeamTickets,
-} from "@/features/supervisor/ticket-scope";
-import { hasSupabasePublicEnv } from "@/lib/supabase-env";
-import { getSupabaseBrowserClient } from "@/lib/supabase";
-import type {
-  AppCaso,
-  AppProfile,
-  TeamTicketFilter,
-  TechnicianDirectoryEntry,
-} from "@/types/domain";
+import { countTeamFilters } from "@/features/supervisor/ticket-scope";
+import { apiClient } from "@/lib/api-client";
+import type { AppCaso, AppProfile, TeamTicketFilter } from "@/types/domain";
 
 const isMockProfile = (profile: AppProfile | null) =>
   Boolean(profile?.userId.startsWith("mock-"));
@@ -30,128 +19,202 @@ const requireSupervisor = (profile: AppProfile | null) => {
   }
 };
 
-const uniqueDirectory = (entries: TechnicianDirectoryEntry[]) => {
-  const byId = new Map<string, TechnicianDirectoryEntry>();
-  for (const entry of entries) {
-    const id = entry.id.trim();
-    const name = entry.name.trim();
-    if (!id || !name || byId.has(id)) {
-      continue;
-    }
-    byId.set(id, { id, name });
-  }
-  return [...byId.values()];
-};
-
-const fetchRemoteDirectory = async (): Promise<TechnicianDirectoryEntry[]> => {
-  const supabase = getSupabaseBrowserClient();
-  const fromCatalog = await supabase
-    .from("crm_technicians")
-    .select("employee_id, name")
-    .eq("active", true)
-    .limit(500);
-  const fromCasos = await supabase
-    .from("crm_wispro_casos")
-    .select("employee_id, employee_name")
-    .not("employee_id", "is", null)
-    .limit(500);
-
-  const catalog = (fromCatalog.data ?? []).map((row) => ({
-    id: String(row.employee_id ?? "").trim(),
-    name: String(row.name ?? "").trim(),
-  }));
-  const casos = (fromCasos.data ?? []).map((row) => ({
-    id: String(row.employee_id ?? "").trim(),
-    name: String(row.employee_name ?? "").trim(),
-  }));
-
-  return uniqueDirectory([...catalog, ...casos]);
-};
-
-export const fetchTechnicianDirectory = async (
-  profile: AppProfile | null,
-): Promise<TechnicianDirectoryEntry[]> => {
-  requireSupervisor(profile);
-  if (isMockProfile(profile) || !hasSupabasePublicEnv()) {
-    return MOCK_TECHNICIAN_DIRECTORY.map((entry) => ({ ...entry }));
-  }
-  return fetchRemoteDirectory();
-};
-
-const fetchRemoteTeamCasos = async (): Promise<AppCaso[]> => {
-  const supabase = getSupabaseBrowserClient();
-  const { data, error } = await supabase
-    .from("crm_wispro_casos")
-    .select(CASO_SELECT_COLUMNS)
-    .in("status", ["open", "scheduled", "done"])
-    .order("employee_name", { ascending: true, nullsFirst: false })
-    .order("window_start", { ascending: true, nullsFirst: false })
-    .limit(200);
-
-  if (error) {
-    throw new Error(error.message || "No se pudo cargar el equipo.");
-  }
-
-  return (data ?? [])
-    .map((row) => mapCrmCasoRow(row as CrmCasoRow))
+const mapApiTickets = (rows: Record<string, unknown>[]): AppCaso[] =>
+  rows
+    .map((row) => mapCrmCasoRow(row as unknown as CrmCasoRow))
     .filter((caso): caso is AppCaso => caso !== null);
+
+const statusForFilter = (filter: TeamTicketFilter) => {
+  if (filter === "done") return "done";
+  if (filter === "today") return "today";
+  return "pending";
 };
 
-const loadTeamCasos = async (profile: AppProfile | null): Promise<AppCaso[]> => {
-  requireSupervisor(profile);
-  if (isMockProfile(profile) || !hasSupabasePublicEnv()) {
-    return listAllMockCasos();
+const managerIdsToExclude = (profile: AppProfile | null) => {
+  const ids = new Set<string>();
+  if (!profile) {
+    return ids;
   }
-  return fetchRemoteTeamCasos();
+  for (const value of [
+    profile.supervisorId,
+    profile.technicianId,
+    profile.userId,
+  ]) {
+    const id = value?.trim();
+    if (id) {
+      ids.add(id);
+    }
+  }
+  return ids;
 };
+
+const isSamePersonName = (left: string, right: string) =>
+  left.trim().toLocaleLowerCase("es") === right.trim().toLocaleLowerCase("es");
 
 export const fetchTeamSnapshot = async (profile: AppProfile | null) => {
-  const all = await loadTeamCasos(profile);
+  requireSupervisor(profile);
+  if (isMockProfile(profile)) {
+    const all = listAllMockCasos();
+    return {
+      tickets: all,
+      counts: countTeamFilters(all),
+    };
+  }
+
+  const [pending, done, today] = await Promise.all([
+    apiClient.getSupervisorTickets({ status: "pending" }),
+    apiClient.getSupervisorTickets({ status: "done" }),
+    apiClient.getSupervisorTickets({ status: "today" }),
+  ]);
+
+  const tickets = mapApiTickets([
+    ...(pending.tickets || []),
+    ...(done.tickets || []),
+  ]);
+  // Deduplicate by id
+  const byId = new Map(tickets.map((ticket) => [ticket.id, ticket]));
+  const merged = [...byId.values()];
+
   return {
-    tickets: all,
-    counts: countTeamFilters(all),
+    tickets: merged,
+    counts: {
+      pending: (pending.tickets || []).length,
+      done: (done.tickets || []).length,
+      today: (today.tickets || []).length,
+    },
   };
 };
 
-export const fetchTeamTickets = async (
+/** Detalle de lectura: busca en pending/done/today (API field_tickets). */
+export const fetchSupervisorTicketDetail = async (
   profile: AppProfile | null,
-  filter: TeamTicketFilter,
-): Promise<AppCaso[]> => {
-  const snapshot = await fetchTeamSnapshot(profile);
-  return filterTeamTickets(snapshot.tickets, filter);
-};
-
-export const fetchSupervisorOwnQueue = async (
-  profile: AppProfile | null,
-  filter: TeamTicketFilter,
-): Promise<AppCaso[]> => {
+  casoId: string,
+): Promise<AppCaso | null> => {
   requireSupervisor(profile);
-  const employeeId = profile?.supervisorId;
-  if (!employeeId) {
-    return [];
+  if (!casoId) {
+    return null;
   }
-  const all = await loadTeamCasos(profile);
-  return filterTeamTickets(all, filter).filter(
-    (caso) => caso.employeeId === employeeId,
-  );
+
+  if (isMockProfile(profile)) {
+    const found = listAllMockCasos().find((caso) => caso.id === casoId) ?? null;
+    return found ? { ...found } : null;
+  }
+
+  const filters: TeamTicketFilter[] = ["pending", "done", "today"];
+  for (const filter of filters) {
+    const payload = await apiClient.getSupervisorTickets({
+      status: statusForFilter(filter),
+    });
+    const mapped = mapApiTickets(payload.tickets || []);
+    const found = mapped.find((caso) => caso.id === casoId);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
 };
 
-export const fetchTechnicianTicketsForSupervisor = async (
+export type SupervisorMetricRow = {
+  technicianId: string;
+  name: string;
+  assigned: number;
+  pending: number;
+  closed: number;
+  closeRatePct: number;
+  avgCloseHours: number | null;
+};
+
+export const fetchSupervisorMetrics = async (
   profile: AppProfile | null,
-  employeeId: string,
-  filter: TeamTicketFilter,
-): Promise<AppCaso[]> => {
+  range: "today" | "7d" | "30d" = "7d",
+): Promise<SupervisorMetricRow[]> => {
   requireSupervisor(profile);
-  const all = await loadTeamCasos(profile);
-  return filterTeamTickets(all, filter).filter(
-    (caso) => caso.employeeId === employeeId,
-  );
-};
+  const excludedManagers = managerIdsToExclude(profile);
+  const selfName = profile?.displayName?.trim() || "";
 
-export const searchTechnicianAsTyped = async (
-  profile: AppProfile | null,
-  query: string,
-) => {
-  const directory = await fetchTechnicianDirectory(profile);
-  return lookupTechnicianAsTyped(directory, query);
+  if (isMockProfile(profile)) {
+    const fieldTechs = MOCK_TECHNICIAN_DIRECTORY.filter(
+      (entry) =>
+        entry.id !== "mock-supervisor" && !excludedManagers.has(entry.id),
+    );
+    const mockByIndex: Omit<SupervisorMetricRow, "technicianId" | "name">[] = [
+      {
+        assigned: 10,
+        pending: 2,
+        closed: 8,
+        closeRatePct: 80,
+        avgCloseHours: 3.2,
+      },
+      {
+        assigned: 8,
+        pending: 3,
+        closed: 5,
+        closeRatePct: 63,
+        avgCloseHours: 5.5,
+      },
+      {
+        assigned: 6,
+        pending: 1,
+        closed: 5,
+        closeRatePct: 83,
+        avgCloseHours: 2.4,
+      },
+      {
+        assigned: 4,
+        pending: 2,
+        closed: 2,
+        closeRatePct: 50,
+        avgCloseHours: 7.1,
+      },
+    ];
+    return fieldTechs.map((entry, index) => {
+      const sample = mockByIndex[index % mockByIndex.length] ?? {
+        assigned: 0,
+        pending: 0,
+        closed: 0,
+        closeRatePct: 0,
+        avgCloseHours: null,
+      };
+      return {
+        technicianId: entry.id,
+        name: entry.name,
+        ...sample,
+      };
+    });
+  }
+
+  const [payload, directoryPayload] = await Promise.all([
+    apiClient.getSupervisorMetrics(range),
+    apiClient.getSupervisorTechnicians(),
+  ]);
+
+  const fieldTechIds = new Set(
+    (directoryPayload.technicians || [])
+      .filter((item) => !item.is_supervisor)
+      .map((item) => item.id),
+  );
+
+  return (payload.metrics || [])
+    .map((row) => ({
+      technicianId: row.technician_id,
+      name: row.name,
+      assigned: row.assigned,
+      pending: row.pending,
+      closed: row.closed,
+      closeRatePct: row.close_rate_pct,
+      avgCloseHours: row.avg_close_hours,
+    }))
+    .filter((row) => {
+      if (excludedManagers.has(row.technicianId)) {
+        return false;
+      }
+      if (selfName && isSamePersonName(row.name, selfName)) {
+        return false;
+      }
+      // Si el directorio trae roles, solo técnicos de campo.
+      if (fieldTechIds.size > 0 && !fieldTechIds.has(row.technicianId)) {
+        return false;
+      }
+      return true;
+    });
 };

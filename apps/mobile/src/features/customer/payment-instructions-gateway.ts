@@ -1,4 +1,6 @@
 import { fetchAccountQuote } from "@/features/customer/account-quote-gateway";
+import { apiClient } from "@/lib/api-client";
+import type { ApiPaymentInstructionMethod } from "@/types/app-channel";
 import type {
   AccountQuote,
   PaymentInstructions,
@@ -6,33 +8,11 @@ import type {
   PaymentMethodOption,
 } from "@/types/domain";
 
-/**
- * Métodos de pago (UX). Los datos bancarios de destino aún no tienen
- * endpoint `/api/app/payment-instructions` — ver docs/BACKEND_GAPS.md §5b.
- * Los montos salen de la cotización real del servidor; no se inventan cuentas.
- */
-export const PAYMENT_METHOD_OPTIONS: PaymentMethodOption[] = [
-  {
-    id: "pago_movil",
-    title: "Pago Móvil",
-    description: null,
-  },
-  {
-    id: "transferencia",
-    title: "Transferencia",
-    description: "Puede demorar más de 48 hrs",
-  },
-  {
-    id: "deposito",
-    title: "Depósito",
-    description: null,
-  },
-  {
-    id: "deposito_usd",
-    title: "Depósito USD",
-    description: null,
-  },
-];
+const isPaymentMethodId = (value: string): value is PaymentMethodId =>
+  value === "pago_movil" ||
+  value === "transferencia" ||
+  value === "deposito" ||
+  value === "deposito_usd";
 
 export const hasPendingDebt = (quote: AccountQuote) =>
   quote.hasDebt ||
@@ -67,28 +47,75 @@ const confirmAmountFor = (quote: AccountQuote, methodId: PaymentMethodId) => {
   return quote.debtBsFormatted ?? quote.debtUsdFormatted ?? "$0,00";
 };
 
+const formatUpdatedAtLabel = (iso: string | null) => {
+  if (!iso) return "Actualizado por tu proveedor";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Actualizado por tu proveedor";
+  return `Actualizado ${date.toLocaleString("es-VE", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+};
+
+const toMethodOption = (
+  method: ApiPaymentInstructionMethod,
+): PaymentMethodOption | null => {
+  if (!isPaymentMethodId(method.id)) return null;
+  return {
+    id: method.id,
+    title: method.title,
+    description: method.description,
+  };
+};
+
+export const fetchPaymentMethodOptions = async (): Promise<
+  PaymentMethodOption[]
+> => {
+  const payload = await apiClient.getPaymentInstructions();
+  return (payload.methods || [])
+    .map(toMethodOption)
+    .filter((item): item is PaymentMethodOption => Boolean(item));
+};
+
 export const fetchPaymentInstructions = async (
   methodId: PaymentMethodId,
 ): Promise<PaymentInstructions> => {
-  const quote = await fetchAccountQuote();
-  const option = PAYMENT_METHOD_OPTIONS.find((item) => item.id === methodId);
+  const [quote, payload] = await Promise.all([
+    fetchAccountQuote(),
+    apiClient.getPaymentInstructions({ method: methodId }),
+  ]);
+
+  const method = (payload.methods || []).find((item) => item.id === methodId);
+  if (!method || !isPaymentMethodId(method.id)) {
+    throw new Error(
+      "Este método de pago no está disponible. Solicita los datos por el chat.",
+    );
+  }
+
+  const amountLine = amountLineFor(quote, methodId);
+  const serverFields = (method.fields || [])
+    .map((field) => ({
+      label: String(field.label || "").trim(),
+      value: String(field.value || "").trim(),
+    }))
+    .filter((field) => field.label && field.value);
+
+  const fields = [
+    { label: "Monto", value: amountLine },
+    ...serverFields.filter(
+      (field) => field.label.toLowerCase() !== "monto",
+    ),
+  ];
 
   return {
     methodId,
-    methodTitle: option?.title ?? "Pago Móvil",
-    bankName: "",
+    methodTitle: method.title,
+    bankName: method.bank_name?.trim() || "",
     confirmAmountLabel: confirmAmountFor(quote, methodId),
-    amountLine: amountLineFor(quote, methodId),
-    fields: [
-      {
-        label: "Monto",
-        value: amountLineFor(quote, methodId),
-      },
-      {
-        label: "Datos bancarios",
-        value: "Solicítalos por el chat de la app",
-      },
-    ],
-    updatedAtLabel: "Pendiente de configuración en el servidor",
+    amountLine,
+    fields,
+    updatedAtLabel: formatUpdatedAtLabel(method.updated_at),
   };
 };

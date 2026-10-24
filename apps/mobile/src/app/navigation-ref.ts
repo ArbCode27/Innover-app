@@ -26,12 +26,10 @@ export const openInboxChat = () => {
   }
 
   if (current.name === "TechnicianApp") {
-    navigationRef.navigate("TechnicianApp", { screen: "Chat" });
-    return;
-  }
-
-  if (current.name === "SupervisorApp") {
-    navigationRef.navigate("SupervisorApp", { screen: "Chat" });
+    navigationRef.navigate("TechnicianApp", {
+      screen: "TechnicianTabs",
+      params: { screen: "Chat" },
+    });
   }
 };
 

@@ -24,11 +24,15 @@ para saldo Wispro, contratos, `crm_payments` y FAQ. No se fingen 200 de
   `SESSION_EXPIRED` / 401 cierran sesión (salvo `WRONG_PASSWORD` e
   `INVALID_SECRET` en login). Sin red: «Sin conexión».
 - **Realtime:** cliente Supabase con `login.realtime` (`setAuth(access_token)`,
-  `persistSession: false`). Canal `app:{conversationId}:{clientId}`. Catch-up
-  `GET /messages?after_id=` al foreground y `CHANNEL_ERROR`. Si `realtime`
-  es null o 503, el chat hace polling REST cada 10 s mientras está abierto.
-  Al volver a foreground se renueva el JWT si faltan < 10 min y se
-  resubscribe si el canal murió.
+  `persistSession: false`). Canal `app:{conversationId}:{channelKey}`. Catch-up
+  `GET /messages?after_id=` (o `/technician/messages`) al foreground y
+  `CHANNEL_ERROR`. Si `realtime` es null o 503, el chat hace polling REST
+  cada 15 s mientras está abierto. Al volver a foreground se renueva el JWT
+  si faltan < 10 min y se resubscribe si el canal murió.
+- **Campo (technician/supervisor):** login deja `conversation`/`realtime`
+  null; el primer `GET /api/app/technician/messages` (o
+  `GET /api/app/realtime-token`) crea el hilo `technician_app` y persiste
+  JWT en sesión. Composer de campo = solo texto (sin media en backend).
 - **Notas internas** (`type=note`) se ocultan. Ubicación se envía como texto
   porque el POST no acepta lat/long.
 - **Push (app):** tras login / sesión / resume pide permiso, obtiene
@@ -163,28 +167,42 @@ para saldo Wispro, contratos, `crm_payments` y FAQ. No se fingen 200 de
   y `pppoe_username`. **IP no está** en el contrato Wispro tipado → `null`.
 - **App:** Contrato / Home no inventan IP ni número FTTH de ejemplo.
 
-### 11. RLS de técnico en `crm_wispro_casos`
+### 11. Tickets de técnico (`field_tickets` vía API)
 
-- **Estado en CRM:** `ENABLE ROW LEVEL SECURITY` sin ningún `CREATE POLICY`. El service role del CRM bypasea RLS. **esto no existe en el CRM; hay que crearlo**
-- **Mock:** `technician-gateway` filtra siempre por `employee_id === profile.technicianId`. Un ticket `other-technician` vive en el store mock y **nunca** se lista ni se cierra. Login mock (`87654321`) no es JWT, así que no se puede «probar RLS» de verdad hasta que existan policies.
-- **Propuesta mínima:** policies JWT `SELECT/UPDATE` solo si `employee_id = app_my_employee_id()`. Prohibido leer o cerrar tickets ajenos.
+- **Estado en Innover-Flow:** `GET/PATCH /api/app/technician/tickets` sobre
+  `field_tickets` (no `crm_wispro_casos`). La app ya no hace fallback a
+  Supabase directo; mock solo si `userId` empieza con `mock-`.
+- **Media en chat de campo:** `POST /api/app/technician/messages` acepta
+  solo texto. **esto no existe en el CRM; hay que crearlo** si se quiere
+  foto/audio/ubicación en el hilo `technician_app`. La app oculta adjuntos
+  y muestra copy claro.
 
-### 12. Cierre de visita desde la app (`resolution_observation`)
+### 12. Cierre de visita desde la app (`observation` + transcripción)
 
-- **Estado en CRM:** `finalizeCrmWisproCaso` (service role) escribe `resolution_observation`, `status='done'`, `closed_at` y cierra Wispro. No hay `POST /api/app/tickets/close`. La transcripción de audio de cierre es de Nova en el webhook, no de la app.
-- **Mock:** el gateway actualiza la fila si hay JWT + anon (`id` + `employee_id` + status abierto). Sesión mock cierra en memoria. Audio sin texto se guarda como «Nota de voz de cierre» porque **no hay transcripción channel=app**.
-- **Propuesta mínima:** RPC o endpoint JWT que reutilice `finalizeCrmWisproCaso` (observación texto; audio transcrito en servidor). Wispro no se cierra desde el teléfono.
+- **Estado en Innover-Flow:**
+  - `PATCH /api/app/technician/tickets/[id]` con
+    `{ action: "close", observation }` (mín. 3 / máx. 2000 caracteres).
+  - `POST /api/app/technician/transcribe` (multipart `file`, JWT app) →
+    `{ text }` (STT en servidor). La transcripción **no** cierra el caso.
+- **App:** el técnico escribe o dicta; al detener el audio se llama a
+  `transcribe`, se rellena la observación (editable) y el cierre sigue siendo
+  el PATCH. Preferido: `recording.m4a` / `audio/m4a` (~12 MB). Sin keys de
+  Groq ni service role en el cliente.
+- **Mock:** perfiles `mock-*` reciben un texto de ejemplo.
 
 ### 13. Zona en la cola
 
 - **Estado en CRM:** no hay columna `zone` en `crm_wispro_casos`. La cola de WhatsApp usa `address_text` como ubicación.
 - **Mock:** la app muestra `address_text` con etiqueta «Zona». Si viene vacío, «Sin zona».
 
-### 14. Vista de supervisor (equipo / técnico)
+### 14. Vista de supervisor (equipo / técnico / métricas)
 
-- **Estado en CRM:** `listAllOpenTeamCasos` y `resolveTechnicianByName` (directorio Wispro + `crm_technicians` + casos) viven en service role. El match de nombres usa fonética y Levenshtein. **No hay endpoint JWT ni RLS de supervisor.**
-- **Mock:** Equipo lee todos los `crm_wispro_casos` (o el store mock). Técnico busca **tal cual** se escribe, sin fonética ni Levenshtein. «Mis tickets» / «mi ruta» filtra `employee_id = supervisorId`. Sin acciones de cierre.
-- **esto no existe en el CRM; hay que crearlo:** `GET /api/app/team-tickets` y `GET /api/app/technicians?name=` + policy `app_is_supervisor()`.
+- **Estado en Innover-Flow:** `GET /api/app/supervisor/technicians`,
+  `GET /api/app/supervisor/tickets?status=pending|done|today&technician_id=`,
+  `GET /api/app/supervisor/metrics?range=today|7d|30d`. Chat compartido:
+  `/api/app/technician/messages`.
+- **App:** Equipo / Resueltos / Métricas. Filtro por técnico en Equipo y
+  Resueltos. Detalle de ticket en solo lectura (sin cierre ajeno). Mock solo `mock-*`.
 
 ### 15. Preguntas frecuentes
 

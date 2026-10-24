@@ -10,7 +10,7 @@ export type ConversationStatus = "abierto" | "proceso" | "resuelto";
 
 export type MessageType = "in" | "out" | "note";
 
-export type MessageSenderType = "client" | "agent" | "bot";
+export type MessageSenderType = "client" | "agent" | "bot" | "technician";
 
 export type MessageMediaType =
   | "audio"

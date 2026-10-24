@@ -7,7 +7,10 @@ import type {
 import type { AppMessage, MessageSenderType } from "@/types/domain";
 
 const isSenderType = (value: string): value is MessageSenderType =>
-  value === "client" || value === "bot" || value === "agent";
+  value === "client" ||
+  value === "bot" ||
+  value === "agent" ||
+  value === "technician";
 
 const mapStatus = (value: string): AppMessage["status"] => {
   if (

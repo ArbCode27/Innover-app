@@ -90,11 +90,17 @@ export const mapApiContracts = (
   payload: ApiContractsResponse,
 ): ContractSnapshot => {
   const primary = payload.primary;
+  const planName =
+    primary?.plan_label ||
+    primary?.ppp_profile ||
+    primary?.plan_name ||
+    payload.plan ||
+    null;
   return {
     holderName: payload.holder_name,
     cedula: payload.cedula,
     cedulaDisplay: payload.cedula_display,
-    planName: primary?.plan_label || primary?.plan_name || null,
+    planName,
     zone: payload.zone,
     contractState: primary?.state ?? null,
     contractStateLabel: primary?.state_label ?? null,

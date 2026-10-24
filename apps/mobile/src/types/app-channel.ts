@@ -51,11 +51,24 @@ export type AppRealtimeSession = {
   conversationId: number;
 };
 
+export type AppChannelRole = "customer" | "technician" | "supervisor";
+
+export type AppChannelTechnician = {
+  id: string;
+  name: string;
+  phone: string | null;
+  document: string | null;
+  isSupervisor: boolean;
+  appEnabled: boolean;
+};
+
 export type AppChannelSession = {
   token: string;
+  role: AppChannelRole;
   organization: AppChannelOrganization;
-  client: AppChannelClient;
-  conversation: AppChannelConversation;
+  client: AppChannelClient | null;
+  technician: AppChannelTechnician | null;
+  conversation: AppChannelConversation | null;
   realtime: AppRealtimeSession | null;
 };
 
@@ -144,6 +157,8 @@ export type RefreshRealtimeResponse = {
 export type GetMessagesResponse = {
   conversation: ApiConversation;
   messages: ApiMessage[];
+  /** Presente en GET /technician/messages (y a veces en customer). */
+  realtime?: ApiRealtimePayload | null;
 };
 
 export type SendMessageResponse = {
@@ -313,6 +328,8 @@ export type ApiContractsResponse = {
   cedula_display: string | null;
   zone: string | null;
   account_status: ClientAccountStatusApi;
+  /** Plan resuelto del cliente (PPP / plan) cuando el contrato no trae nombre. */
+  plan?: string | null;
   primary: ApiContract | null;
   contracts: ApiContract[];
 };
@@ -330,4 +347,18 @@ export type ApiPayment = {
 
 export type ApiPaymentsResponse = {
   payments: ApiPayment[];
+};
+
+export type ApiPaymentInstructionMethod = {
+  id: "pago_movil" | "transferencia" | "deposito" | "deposito_usd";
+  title: string;
+  description: string | null;
+  bank_name: string | null;
+  currency: "VES" | "USD";
+  fields: Array<{ label: string; value: string }>;
+  updated_at: string | null;
+};
+
+export type ApiPaymentInstructionsResponse = {
+  methods: ApiPaymentInstructionMethod[];
 };
